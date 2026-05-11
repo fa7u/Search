@@ -19,7 +19,8 @@ import {
   BarChart3, 
   ChevronRight,
   Database,
-  Download
+  Download,
+  Info
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -238,6 +239,19 @@ export default function App() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const getHeaderTooltip = (header: string) => {
+    const h = header.toLowerCase();
+    if (h.includes('اسم') || h.includes('name')) return 'الاسم الكامل للعميل أو المستأجر';
+    if (h.includes('عقار') || h.includes('وحدة') || h.includes('address')) return 'وصف العقار أو الوحدة السكنية';
+    if (h.includes('مبلغ') || h.includes('إجمالي') || h.includes('amount')) return 'إجمالي القيمة المالية المستحقة';
+    if (h.includes('متبقي') || h.includes('باقي') || h.includes('remaining')) return 'المبلغ المتبقي الذي لم يتم سداده بعد';
+    if (h.includes('دفع') || h.includes('مدفوع') || h.includes('payment')) return 'المبالغ التي تم تحصيلها بالفعل';
+    if (h.includes('تاريخ') || h.includes('date')) return 'تاريخ العملية أو موعد الاستحقاق';
+    if (h.includes('ملاحظات') || h.includes('notes')) return 'أي تفاصيل إضافية أو تنبيهات متعلقة بالسجل';
+    if (h.includes('هاتف') || h.includes('جوال') || h.includes('phone')) return 'رقم التواصل الخاص بالسجل';
+    return 'بيانات إضافية متعلقة بهذا العمود';
+  };
+
   const exportToExcel = () => {
     if (filteredData.length === 0 && !searchQuery.trim()) return;
     
@@ -293,10 +307,21 @@ export default function App() {
 
     // 4. Apply Styles to Data Rows
     for (let R = range.s.r + 1; R <= range.e.r; ++R) {
+      // Find the actual row data in the current export set
+      const rowData = dataToExport[R - 1];
+      // Find its original index in the main 'data' array to check paidRows status
+      const originalIdx = data.findIndex(r => r === rowData);
+      const isPaid = paidRows.has(originalIdx);
+      
+      const rowBgColor = isPaid ? "D1FAE5" : "FFFFFF"; // Emerald 100 for paid, white for normal
+
       for (let C = range.s.c; C <= range.e.c; ++C) {
         const address = XLSX.utils.encode_cell({ r: R, c: C });
         if (worksheet[address]) {
-          worksheet[address].s = dataStyle;
+          worksheet[address].s = {
+            ...dataStyle,
+            fill: { fgColor: { rgb: rowBgColor } }
+          };
         }
       }
     }
@@ -566,7 +591,7 @@ export default function App() {
                           {headers.map((header) => (
                             <th 
                               key={header} 
-                              className={`px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider hover:text-indigo-600 transition-colors whitespace-nowrap ${
+                              className={`px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider hover:text-indigo-600 transition-colors whitespace-nowrap relative group/tooltip ${
                                 header.includes('الملاحظات') || header.includes('ملاحظات') || header.includes('notes') 
                                   ? 'min-w-[300px]' 
                                   : header.includes('الدفع') || header.includes('payment')
@@ -574,7 +599,18 @@ export default function App() {
                                   : 'min-w-[140px]'
                               }`}
                             >
-                              {header}
+                              <div className="flex items-center justify-center gap-1.5">
+                                {header}
+                                <Info size={12} className="text-slate-300 group-hover/tooltip:text-indigo-400 transition-colors" />
+                              </div>
+                              
+                              {/* Tooltip */}
+                              <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 px-3 py-2 bg-slate-800 text-white text-[10px] rounded-lg opacity-0 invisible group-hover/tooltip:opacity-100 group-hover/tooltip:visible transition-all duration-200 z-50 w-48 pointer-events-none shadow-xl border border-slate-700">
+                                <div className="relative z-10 text-center font-medium leading-relaxed">
+                                  {getHeaderTooltip(header)}
+                                </div>
+                                <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-l-4 border-r-4 border-t-4 border-transparent border-t-slate-800"></div>
+                              </div>
                             </th>
                           ))}
                         </tr>
