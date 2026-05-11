@@ -33,6 +33,7 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
+  const [paidRows, setPaidRows] = useState<Set<number>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredData = useMemo(() => {
@@ -100,10 +101,12 @@ export default function App() {
 
           getRequest.onsuccess = () => {
             if (getRequest.result) {
-              const { data: savedData, headers: savedHeaders, fileName: savedName } = getRequest.result;
+              const res = getRequest.result as { data: DataRow[], headers: string[], fileName: string, paidIndices?: number[] };
+              const { data: savedData, headers: savedHeaders, fileName: savedName, paidIndices } = res;
               setData(savedData);
               setHeaders(savedHeaders);
               setFileName(savedName);
+              if (paidIndices) setPaidRows(new Set(paidIndices));
             }
             setIsLoading(false);
           };
@@ -137,7 +140,7 @@ export default function App() {
   }, [searchQuery]);
 
   // Save to IndexedDB helper
-  const saveToDB = (fileData: DataRow[], fileHeaders: string[], name: string) => {
+  const saveToDB = (fileData: DataRow[], fileHeaders: string[], name: string, paidIndices: number[] = []) => {
     try {
       const dbRequest = indexedDB.open('FileSearchDB', 1);
       dbRequest.onsuccess = (e: any) => {
@@ -149,6 +152,7 @@ export default function App() {
           data: fileData,
           headers: fileHeaders,
           fileName: name,
+          paidIndices: paidIndices,
           updatedAt: new Date().toISOString()
         });
       };
@@ -179,6 +183,20 @@ export default function App() {
     processFile(file);
   };
 
+  const togglePaid = (originalIdx: number) => {
+    setPaidRows(prev => {
+      const next = new Set(prev);
+      if (next.has(originalIdx)) {
+        next.delete(originalIdx);
+      } else {
+        next.add(originalIdx);
+      }
+      // Persist immediately
+      saveToDB(data, headers, fileName || '', Array.from(next) as number[]);
+      return next;
+    });
+  };
+
   const processFile = (file: File) => {
     setIsLoading(true);
     setFileName(file.name);
@@ -195,7 +213,8 @@ export default function App() {
           const newHeaders = Object.keys(jsonData[0]);
           setHeaders(newHeaders);
           setData(jsonData);
-          saveToDB(jsonData, newHeaders, file.name);
+          setPaidRows(new Set());
+          saveToDB(jsonData, newHeaders, file.name, []);
         } else {
           alert('الملف فارغ أو لا يحتوي على بيانات صحيحة.');
         }
@@ -214,6 +233,7 @@ export default function App() {
     setHeaders([]);
     setSearchQuery('');
     setFileName(null);
+    setPaidRows(new Set());
     removeFromDB();
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -249,7 +269,7 @@ export default function App() {
     };
 
     const summaryStyle = {
-      fill: { fgColor: { rgb: "F8FAF0" } }, // Slightly yellowish to stand out
+      fill: { fgColor: { rgb: "F1F5F9" } },
       font: { bold: true, sz: 12, color: { rgb: "1E293B" } },
       alignment: { horizontal: "right", vertical: "center" },
       border: {
@@ -301,15 +321,15 @@ export default function App() {
     });
 
     // Style the new summary row
-    const lastRowIndex = range.e.r + 2; // +1 for 0-index offset, +1 for the newly added row
+    const lastRowIndex = range.e.r + 2; 
     for (let C = range.s.c; C <= range.e.c; ++C) {
       const address = XLSX.utils.encode_cell({ r: lastRowIndex - 1, c: C });
       if (worksheet[address]) {
         const header = headers[C];
         if (header === totals.amountCol) {
-          worksheet[address].s = highlightStyle("4F46E5"); // Indigo
+          worksheet[address].s = highlightStyle("4F46E5"); 
         } else if (header === totals.remainingCol) {
-          worksheet[address].s = highlightStyle("EA580C"); // Orange 600
+          worksheet[address].s = highlightStyle("EA580C"); 
         } else {
           worksheet[address].s = summaryStyle;
         }
@@ -327,7 +347,6 @@ export default function App() {
     });
     worksheet['!cols'] = wscols;
 
-    // Set Sheet direction to RTL
     worksheet['!views'] = [{ RTL: true }];
 
     const workbook = XLSX.utils.book_new();
@@ -543,6 +562,7 @@ export default function App() {
                       <thead className="sticky top-0 bg-slate-50 z-20 border-b border-slate-200">
                         <tr>
                           <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase text-center w-12 hover:text-indigo-600 transition-colors">#</th>
+                          <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase text-center w-24">إجراء</th>
                           {headers.map((header) => (
                             <th 
                               key={header} 
@@ -560,39 +580,58 @@ export default function App() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100">
-                        {filteredData.map((row, idx) => (
-                          <motion.tr
-                            key={idx}
-                            initial={{ opacity: 0 }}
-                            animate={{ opacity: 1 }}
-                            transition={{ delay: Math.min(idx * 0.01, 0.2) }}
-                            className="hover:bg-indigo-50/30 transition-colors group"
-                          >
-                            <td className="px-6 py-4 text-xs font-medium text-slate-400 text-center bg-slate-50/30">
-                              {idx + 1}
-                            </td>
-                            {headers.map((header) => (
-                              <td 
-                                key={header} 
-                                className={`px-6 py-4 text-sm font-medium text-slate-600 ${
-                                  header.includes('الملاحظات') || header.includes('ملاحظات') || header.includes('notes')
-                                    ? 'whitespace-normal min-w-[300px] break-words'
-                                    : header.includes('الدفع') || header.includes('payment')
-                                    ? 'whitespace-normal min-w-[150px]'
-                                    : 'whitespace-nowrap max-w-[250px] overflow-hidden text-ellipsis'
-                                }`}
-                              >
-                                {highlightText(String(row[header] || '-'), searchQuery)}
+                        {filteredData.map((row, idx) => {
+                          // Find original index in 'data' to maintain status correctly
+                          const originalIdx = data.findIndex(r => r === row);
+                          const isPaid = paidRows.has(originalIdx);
+                          
+                          return (
+                            <motion.tr
+                              key={idx}
+                              initial={{ opacity: 0 }}
+                              animate={{ opacity: 1 }}
+                              transition={{ delay: Math.min(idx * 0.01, 0.2) }}
+                              className={`transition-colors group ${isPaid ? 'bg-emerald-50 hover:bg-emerald-100/80' : 'hover:bg-indigo-50/30'}`}
+                            >
+                              <td className={`px-6 py-4 text-xs font-medium text-center ${isPaid ? 'text-emerald-500 bg-emerald-50/50' : 'text-slate-400 bg-slate-50/30'}`}>
+                                {idx + 1}
                               </td>
-                            ))}
-                          </motion.tr>
-                        ))}
+                              <td className="px-4 py-2 text-center">
+                                <button
+                                  onClick={() => togglePaid(originalIdx)}
+                                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
+                                    isPaid 
+                                      ? 'bg-emerald-500 text-white shadow-sm' 
+                                      : 'bg-slate-100 text-slate-500 hover:bg-emerald-500 hover:text-white'
+                                  }`}
+                                >
+                                  {isPaid ? 'تم السداد' : 'تسوية'}
+                                </button>
+                              </td>
+                              {headers.map((header) => (
+                                <td 
+                                  key={header} 
+                                  className={`px-6 py-4 text-sm font-medium ${isPaid ? 'text-emerald-700' : 'text-slate-600'} ${
+                                    header.includes('الملاحظات') || header.includes('ملاحظات') || header.includes('notes')
+                                      ? 'whitespace-normal min-w-[300px] break-words'
+                                      : header.includes('الدفع') || header.includes('payment')
+                                      ? 'whitespace-normal min-w-[150px]'
+                                      : 'whitespace-nowrap max-w-[250px] overflow-hidden text-ellipsis'
+                                  }`}
+                                >
+                                  {highlightText(String(row[header] || '-'), searchQuery)}
+                                </td>
+                              ))}
+                            </motion.tr>
+                          );
+                        })}
                       </tbody>
 
                       {/* PDF/Print Financial Summary Row */}
                       <tfoot className="bg-slate-50 font-bold border-t-2 border-slate-200">
                         <tr>
                           <td className="px-6 py-4 text-xs text-slate-400 text-center">Σ</td>
+                          <td className="px-6 py-4 text-xs text-slate-400 text-center">-</td>
                           {headers.map((header) => {
                             const isAmount = header === totals.amountCol;
                             const isRemaining = header === totals.remainingCol;
