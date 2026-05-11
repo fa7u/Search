@@ -36,6 +36,7 @@ export default function App() {
   const [fileName, setFileName] = useState<string | null>(null);
   const [paidRows, setPaidRows] = useState<Set<number>>(new Set());
   const [editingCell, setEditingCell] = useState<{ row: number; col: string } | null>(null);
+  const [isModified, setIsModified] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredData = useMemo(() => {
@@ -103,12 +104,13 @@ export default function App() {
 
           getRequest.onsuccess = () => {
             if (getRequest.result) {
-              const res = getRequest.result as { data: DataRow[], headers: string[], fileName: string, paidIndices?: number[] };
-              const { data: savedData, headers: savedHeaders, fileName: savedName, paidIndices } = res;
+              const res = getRequest.result as { data: DataRow[], headers: string[], fileName: string, paidIndices?: number[], isModified?: boolean };
+              const { data: savedData, headers: savedHeaders, fileName: savedName, paidIndices, isModified: savedModified } = res;
               setData(savedData);
               setHeaders(savedHeaders);
               setFileName(savedName);
               if (paidIndices) setPaidRows(new Set(paidIndices));
+              if (savedModified) setIsModified(savedModified);
             }
             setIsLoading(false);
           };
@@ -142,7 +144,7 @@ export default function App() {
   }, [searchQuery]);
 
   // Save to IndexedDB helper
-  const saveToDB = (fileData: DataRow[], fileHeaders: string[], name: string, paidIndices: number[] = []) => {
+  const saveToDB = (fileData: DataRow[], fileHeaders: string[], name: string, paidIndices: number[] = [], modified = false) => {
     try {
       const dbRequest = indexedDB.open('FileSearchDB', 1);
       dbRequest.onsuccess = (e: any) => {
@@ -155,6 +157,7 @@ export default function App() {
           headers: fileHeaders,
           fileName: name,
           paidIndices: paidIndices,
+          isModified: modified,
           updatedAt: new Date().toISOString()
         });
       };
@@ -193,8 +196,9 @@ export default function App() {
       } else {
         next.add(originalIdx);
       }
+      setIsModified(true);
       // Persist immediately
-      saveToDB(data, headers, fileName || '', Array.from(next) as number[]);
+      saveToDB(data, headers, fileName || '', Array.from(next) as number[], true);
       return next;
     });
   };
@@ -203,8 +207,9 @@ export default function App() {
     setData(prev => {
       const next = [...prev];
       next[originalIdx] = { ...next[originalIdx], [header]: newValue };
+      setIsModified(true);
       // Persist the full data and the current paid indices
-      saveToDB(next, headers, fileName || '', Array.from(paidRows));
+      saveToDB(next, headers, fileName || '', Array.from(paidRows) as number[], true);
       return next;
     });
   };
@@ -226,7 +231,8 @@ export default function App() {
           setHeaders(newHeaders);
           setData(jsonData);
           setPaidRows(new Set());
-          saveToDB(jsonData, newHeaders, file.name, []);
+          setIsModified(false);
+          saveToDB(jsonData, newHeaders, file.name, [], false);
         } else {
           alert('الملف فارغ أو لا يحتوي على بيانات صحيحة.');
         }
@@ -246,6 +252,7 @@ export default function App() {
     setSearchQuery('');
     setFileName(null);
     setPaidRows(new Set());
+    setIsModified(false);
     removeFromDB();
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
@@ -263,16 +270,19 @@ export default function App() {
     return 'بيانات إضافية متعلقة بهذا العمود';
   };
 
-  const exportToExcel = () => {
-    if (filteredData.length === 0 && !searchQuery.trim()) return;
+  const exportToExcel = (forceAll = false) => {
+    // 1. Decide which data set to export
+    // If forceAll is true, take the entire 'data' array. 
+    // Otherwise, check if there's a search query to take filteredData.
+    const isExportAll = forceAll || !searchQuery.trim();
+    const dataToExport = isExportAll ? data : filteredData;
     
-    const dataToExport = searchQuery.trim() ? filteredData : data;
     if (dataToExport.length === 0) return;
 
-    // 1. Create worksheet from data
+    // 2. Create worksheet from data
     const worksheet = XLSX.utils.json_to_sheet(dataToExport);
 
-    // 2. Define Styles
+    // 3. Define Styles
     const headerStyle = {
       fill: { fgColor: { rgb: "4F46E5" } }, // Indigo 600
       font: { color: { rgb: "FFFFFF" }, bold: true, sz: 12 },
@@ -294,7 +304,7 @@ export default function App() {
     };
 
     const summaryStyle = {
-      fill: { fgColor: { rgb: "F1F5F9" } },
+      fill: { fgColor: { rgb: "F1F5F9" } }, 
       font: { bold: true, sz: 12, color: { rgb: "1E293B" } },
       alignment: { horizontal: "right", vertical: "center" },
       border: {
@@ -302,12 +312,12 @@ export default function App() {
       }
     };
 
-    const highlightStyle = (color: string) => ({
+    const highlightStyle = (colorCode: string) => ({
       ...summaryStyle,
-      font: { ...summaryStyle.font, color: { rgb: color } }
+      font: { ...summaryStyle.font, color: { rgb: colorCode } }
     });
 
-    // 3. Apply Styles to Header
+    // 4. Apply Styles to Header
     const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
     for (let C = range.s.c; C <= range.e.c; ++C) {
       const address = XLSX.utils.encode_col(C) + "1";
@@ -316,15 +326,12 @@ export default function App() {
       }
     }
 
-    // 4. Apply Styles to Data Rows
+    // 5. Apply Styles to Data Rows
     for (let R = range.s.r + 1; R <= range.e.r; ++R) {
-      // Find the actual row data in the current export set
       const rowData = dataToExport[R - 1];
-      // Find its original index in the main 'data' array to check paidRows status
       const originalIdx = data.findIndex(r => r === rowData);
       const isPaid = paidRows.has(originalIdx);
-      
-      const rowBgColor = isPaid ? "D1FAE5" : "FFFFFF"; // Emerald 100 for paid, white for normal
+      const rowBgColor = isPaid ? "D1FAE5" : "FFFFFF"; 
 
       for (let C = range.s.c; C <= range.e.c; ++C) {
         const address = XLSX.utils.encode_cell({ r: R, c: C });
@@ -337,7 +344,7 @@ export default function App() {
       }
     }
 
-    // 5. Add Summary Row & Style it
+    // 6. Add Summary Row
     const summaryRowData = {};
     headers.forEach(h => {
       if (h === totals.amountCol) {
@@ -356,7 +363,7 @@ export default function App() {
       origin: -1
     });
 
-    // Style the new summary row
+    // Style the summary row
     const lastRowIndex = range.e.r + 2; 
     for (let C = range.s.c; C <= range.e.c; ++C) {
       const address = XLSX.utils.encode_cell({ r: lastRowIndex - 1, c: C });
@@ -372,22 +379,23 @@ export default function App() {
       }
     }
 
-    // 6. Set Column Widths & RTL
+    // 7. Config widths & RTL
     const wscols = headers.map(h => {
       const hLower = h.toLowerCase();
-      if (hLower.includes('ملاحظات') || hLower.includes('notes') || hLower.includes('التفاصيل')) return { wch: 50 };
-      if (hLower.includes('اسم') || hLower.includes('name') || hLower.includes('عقار') || hLower.includes('address')) return { wch: 35 };
-      if (hLower.includes('دفع') || hLower.includes('payment') || hLower.includes('تاريخ') || hLower.includes('date')) return { wch: 25 };
-      if (hLower.includes('رقم') || hLower.includes('phone') || hLower.includes('جوال')) return { wch: 20 };
+      if (hLower.includes('ملاحظات')) return { wch: 50 };
+      if (hLower.includes('اسم') || hLower.includes('عقار')) return { wch: 35 };
+      if (hLower.includes('دفع') || hLower.includes('تاريخ')) return { wch: 25 };
       return { wch: 18 };
     });
     worksheet['!cols'] = wscols;
-
     worksheet['!views'] = [{ RTL: true }];
 
     const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "البيانات");
-    XLSX.writeFile(workbook, `سجلات_${fileName || 'بيانات'}_${new Date().toLocaleDateString('ar-SA')}.xlsx`);
+    XLSX.utils.book_append_sheet(workbook, worksheet, "البيانات المعدلة");
+    const dateStr = new Date().toISOString().split('T')[0];
+    const fileNameSafe = (fileName || 'بيانات').replace(/[\\/:*?"<>|]/g, '_');
+    const suffix = isExportAll ? 'الكل_معدل' : 'نتائج_البحث';
+    XLSX.writeFile(workbook, `سجلات_${fileNameSafe}_${suffix}_${dateStr}.xlsx`);
   };
 
   return (
@@ -511,6 +519,30 @@ export default function App() {
                 * لم يتم العثور على أعمدة مخصصة للمبالغ تلقائياً. تأكد من تسمية الأعمدة بكلمات مثل (المبلغ) أو (المتبقي).
               </p>
             )}
+
+            {/* Final Save/Download Button */}
+            <AnimatePresence>
+              {isModified && (
+                <motion.div
+                  initial={{ opacity: 0, height: 0, marginTop: 0 }}
+                  animate={{ opacity: 1, height: 'auto', marginTop: 24 }}
+                  exit={{ opacity: 0, height: 0, marginTop: 0 }}
+                  className="overflow-hidden"
+                >
+                  <button 
+                    onClick={() => exportToExcel(true)}
+                    className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-sm hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-100 flex items-center justify-center gap-3 group"
+                  >
+                    <Database size={20} className="group-hover:scale-110 transition-transform" />
+                    <span>حفظ وتحميل الملف المعدّل (كامل)</span>
+                  </button>
+                  <p className="text-[10px] text-emerald-600 font-bold mt-2 text-center flex items-center justify-center gap-1">
+                    <Info size={10} />
+                    تم إجراء تعديلات على البيانات
+                  </p>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </section>
         </aside>
 
