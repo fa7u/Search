@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { useState, useMemo, useRef, useEffect } from 'react';
-import * as XLSX from 'xlsx';
+import * as XLSX from 'xlsx-js-style';
 import { 
   Upload, 
   Search, 
@@ -19,7 +19,6 @@ import {
   BarChart3, 
   ChevronRight,
   Database,
-  Printer,
   Download
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
@@ -219,6 +218,123 @@ export default function App() {
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  const exportToExcel = () => {
+    if (filteredData.length === 0 && !searchQuery.trim()) return;
+    
+    const dataToExport = searchQuery.trim() ? filteredData : data;
+    if (dataToExport.length === 0) return;
+
+    // 1. Create worksheet from data
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+
+    // 2. Define Styles
+    const headerStyle = {
+      fill: { fgColor: { rgb: "4F46E5" } }, // Indigo 600
+      font: { color: { rgb: "FFFFFF" }, bold: true, sz: 12 },
+      alignment: { horizontal: "center", vertical: "center", wrapText: true },
+      border: {
+        top: { style: "thin", color: { rgb: "E2E8F0" } },
+        bottom: { style: "thin", color: { rgb: "E2E8F0" } },
+        left: { style: "thin", color: { rgb: "E2E8F0" } },
+        right: { style: "thin", color: { rgb: "E2E8F0" } }
+      }
+    };
+
+    const dataStyle = {
+      font: { sz: 11, color: { rgb: "334155" } },
+      alignment: { horizontal: "right", vertical: "center", wrapText: true },
+      border: {
+        bottom: { style: "thin", color: { rgb: "F1F5F9" } }
+      }
+    };
+
+    const summaryStyle = {
+      fill: { fgColor: { rgb: "F8FAF0" } }, // Slightly yellowish to stand out
+      font: { bold: true, sz: 12, color: { rgb: "1E293B" } },
+      alignment: { horizontal: "right", vertical: "center" },
+      border: {
+        top: { style: "medium", color: { rgb: "4F46E5" } }
+      }
+    };
+
+    const highlightStyle = (color: string) => ({
+      ...summaryStyle,
+      font: { ...summaryStyle.font, color: { rgb: color } }
+    });
+
+    // 3. Apply Styles to Header
+    const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      const address = XLSX.utils.encode_col(C) + "1";
+      if (worksheet[address]) {
+        worksheet[address].s = headerStyle;
+      }
+    }
+
+    // 4. Apply Styles to Data Rows
+    for (let R = range.s.r + 1; R <= range.e.r; ++R) {
+      for (let C = range.s.c; C <= range.e.c; ++C) {
+        const address = XLSX.utils.encode_cell({ r: R, c: C });
+        if (worksheet[address]) {
+          worksheet[address].s = dataStyle;
+        }
+      }
+    }
+
+    // 5. Add Summary Row & Style it
+    const summaryRowData = {};
+    headers.forEach(h => {
+      if (h === totals.amountCol) {
+        summaryRowData[h] = `الإجمالي: ${totals.totalAmount.toLocaleString('ar-SA')} ر.س`;
+      } else if (h === totals.remainingCol) {
+        summaryRowData[h] = `المتبقي: ${totals.totalRemaining.toLocaleString('ar-SA')} ر.س`;
+      } else if (h === headers[0]) {
+        summaryRowData[h] = '--- الملخص الإجمالي ---';
+      } else {
+        summaryRowData[h] = '';
+      }
+    });
+
+    XLSX.utils.sheet_add_json(worksheet, [summaryRowData], {
+      skipHeader: true,
+      origin: -1
+    });
+
+    // Style the new summary row
+    const lastRowIndex = range.e.r + 2; // +1 for 0-index offset, +1 for the newly added row
+    for (let C = range.s.c; C <= range.e.c; ++C) {
+      const address = XLSX.utils.encode_cell({ r: lastRowIndex - 1, c: C });
+      if (worksheet[address]) {
+        const header = headers[C];
+        if (header === totals.amountCol) {
+          worksheet[address].s = highlightStyle("4F46E5"); // Indigo
+        } else if (header === totals.remainingCol) {
+          worksheet[address].s = highlightStyle("EA580C"); // Orange 600
+        } else {
+          worksheet[address].s = summaryStyle;
+        }
+      }
+    }
+
+    // 6. Set Column Widths & RTL
+    const wscols = headers.map(h => {
+      const hLower = h.toLowerCase();
+      if (hLower.includes('ملاحظات') || hLower.includes('notes') || hLower.includes('التفاصيل')) return { wch: 50 };
+      if (hLower.includes('اسم') || hLower.includes('name') || hLower.includes('عقار') || hLower.includes('address')) return { wch: 35 };
+      if (hLower.includes('دفع') || hLower.includes('payment') || hLower.includes('تاريخ') || hLower.includes('date')) return { wch: 25 };
+      if (hLower.includes('رقم') || hLower.includes('phone') || hLower.includes('جوال')) return { wch: 20 };
+      return { wch: 18 };
+    });
+    worksheet['!cols'] = wscols;
+
+    // Set Sheet direction to RTL
+    worksheet['!views'] = [{ RTL: true }];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "البيانات");
+    XLSX.writeFile(workbook, `سجلات_${fileName || 'بيانات'}_${new Date().toLocaleDateString('ar-SA')}.xlsx`);
+  };
+
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col font-sans" dir="rtl">
       {/* Top Navigation Bar */}
@@ -409,11 +525,13 @@ export default function App() {
                     <p className="text-slate-500 font-medium">تم العثور على {filteredData.length} سجل مطابق</p>
                   </div>
                   <div className="flex gap-2">
-                    <button className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 hover:text-indigo-600 transition-all shadow-sm">
-                      <Printer size={18} />
-                    </button>
-                    <button className="p-2.5 bg-white border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 hover:text-indigo-600 transition-all shadow-sm">
-                      <Download size={18} />
+                    <button 
+                      onClick={exportToExcel}
+                      className="px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-md flex items-center gap-2 group"
+                      title="تحميل ملف Excel"
+                    >
+                      <Download size={18} className="group-hover:translate-y-0.5 transition-transform" />
+                      <span className="text-sm font-bold">تحميل excel</span>
                     </button>
                   </div>
                 </div>
@@ -428,7 +546,13 @@ export default function App() {
                           {headers.map((header) => (
                             <th 
                               key={header} 
-                              className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-normal min-w-[150px] hover:text-indigo-600 transition-colors"
+                              className={`px-6 py-4 text-[10px] font-black text-slate-500 uppercase tracking-wider hover:text-indigo-600 transition-colors whitespace-nowrap ${
+                                header.includes('الملاحظات') || header.includes('ملاحظات') || header.includes('notes') 
+                                  ? 'min-w-[300px]' 
+                                  : header.includes('الدفع') || header.includes('payment')
+                                  ? 'min-w-[150px]'
+                                  : 'min-w-[140px]'
+                              }`}
                             >
                               {header}
                             </th>
@@ -450,7 +574,13 @@ export default function App() {
                             {headers.map((header) => (
                               <td 
                                 key={header} 
-                                className="px-6 py-4 text-sm font-semibold text-slate-700 whitespace-nowrap max-w-xs overflow-hidden text-ellipsis"
+                                className={`px-6 py-4 text-sm font-medium text-slate-600 ${
+                                  header.includes('الملاحظات') || header.includes('ملاحظات') || header.includes('notes')
+                                    ? 'whitespace-normal min-w-[300px] break-words'
+                                    : header.includes('الدفع') || header.includes('payment')
+                                    ? 'whitespace-normal min-w-[150px]'
+                                    : 'whitespace-nowrap max-w-[250px] overflow-hidden text-ellipsis'
+                                }`}
                               >
                                 {highlightText(String(row[header] || '-'), searchQuery)}
                               </td>
@@ -458,6 +588,25 @@ export default function App() {
                           </motion.tr>
                         ))}
                       </tbody>
+
+                      {/* PDF/Print Financial Summary Row */}
+                      <tfoot className="bg-slate-50 font-bold border-t-2 border-slate-200">
+                        <tr>
+                          <td className="px-6 py-4 text-xs text-slate-400 text-center">Σ</td>
+                          {headers.map((header) => {
+                            const isAmount = header === totals.amountCol;
+                            const isRemaining = header === totals.remainingCol;
+                            
+                            return (
+                              <td key={header} className={`px-6 py-4 text-sm ${isAmount ? 'text-indigo-600' : isRemaining ? 'text-orange-600' : 'text-slate-500'}`}>
+                                {isAmount ? `الإجمالي: ${totals.totalAmount.toLocaleString('ar-SA')} ر.س` : 
+                                 isRemaining ? `المتبقي: ${totals.totalRemaining.toLocaleString('ar-SA')} ر.س` : 
+                                 header === headers[0] ? 'ملخص مالي' : ''}
+                              </td>
+                            );
+                          })}
+                        </tr>
+                      </tfoot>
                     </table>
                   </div>
                   
