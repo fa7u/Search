@@ -418,44 +418,54 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Detailed Record List */}
-                <div className="flex-1 overflow-y-auto pr-1 space-y-4 pb-8">
-                  {filteredData.map((row, idx) => (
-                    <motion.div
-                      key={idx}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: idx * 0.05 }}
-                      className="bg-white rounded-3xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow flex flex-col overflow-hidden"
-                    >
-                      <div className="p-6 md:p-8 flex items-start gap-4 md:gap-6 border-b border-slate-100 bg-slate-50/30">
-                        <div className="w-16 h-16 md:w-20 md:h-20 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-2xl md:rounded-3xl shadow-lg flex items-center justify-center text-2xl md:text-3xl font-bold text-white uppercase shrink-0">
-                          {String(Object.values(row)[0] || '?')[0]}
-                        </div>
-                        <div className="flex-1 min-w-0 text-right">
-                          <div className="flex items-center flex-wrap gap-2 md:gap-3 mb-1">
-                            <h2 className="text-xl md:text-3xl font-bold text-slate-800 truncate">
-                              {String(row[headers[0]] || 'سجل غير معنون')}
-                            </h2>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      <div className="p-6 md:p-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-y-8 gap-x-12">
-                        {headers.map((header) => (
-                          <div key={header} className="space-y-1 group">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-normal block transition-colors group-hover:text-indigo-400">
+                {/* Table View */}
+                <div className="flex-1 bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                  <div className="flex-1 overflow-auto custom-scrollbar">
+                    <table className="w-full text-right border-collapse">
+                      <thead className="sticky top-0 bg-slate-50 z-20 border-b border-slate-200">
+                        <tr>
+                          <th className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase text-center w-12 hover:text-indigo-600 transition-colors">#</th>
+                          {headers.map((header) => (
+                            <th 
+                              key={header} 
+                              className="px-6 py-4 text-[10px] font-bold text-slate-400 uppercase tracking-normal min-w-[150px] hover:text-indigo-600 transition-colors"
+                            >
                               {header}
-                            </label>
-                            <p className="text-base md:text-lg font-semibold text-slate-700 break-all">
-                              {highlightText(String(row[header] || '-'), searchQuery)}
-                            </p>
-                          </div>
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {filteredData.map((row, idx) => (
+                          <motion.tr
+                            key={idx}
+                            initial={{ opacity: 0 }}
+                            animate={{ opacity: 1 }}
+                            transition={{ delay: Math.min(idx * 0.01, 0.2) }}
+                            className="hover:bg-indigo-50/30 transition-colors group"
+                          >
+                            <td className="px-6 py-4 text-xs font-medium text-slate-400 text-center bg-slate-50/30">
+                              {idx + 1}
+                            </td>
+                            {headers.map((header) => (
+                              <td 
+                                key={header} 
+                                className="px-6 py-4 text-sm font-semibold text-slate-700 whitespace-nowrap max-w-xs overflow-hidden text-ellipsis"
+                              >
+                                {highlightText(String(row[header] || '-'), searchQuery)}
+                              </td>
+                            ))}
+                          </motion.tr>
                         ))}
-                      </div>
-
-                    </motion.div>
-                  ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  
+                  {/* Table Footer / Summary */}
+                  <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-[10px] font-bold text-slate-400 uppercase tracking-normal">
+                    <span>نهاية النتائج المطابقة</span>
+                    <span>إجمالي الصفوف المعروضة: {filteredData.length}</span>
+                  </div>
                 </div>
               </div>
             )}
