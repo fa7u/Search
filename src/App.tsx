@@ -290,19 +290,19 @@ export default function App() {
           {/* Statistics Cards */}
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm group hover:border-indigo-200 transition-colors">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">إجمالي السجلات</p>
-              <p className="text-2xl font-bold text-slate-800 tracking-tight">{data.length.toLocaleString()}</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-normal mb-1">إجمالي السجلات</p>
+              <p className="text-2xl font-bold text-slate-800 tracking-normal">{data.length.toLocaleString()}</p>
             </div>
             <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm group hover:border-indigo-200 transition-colors">
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">عدد الأعمدة</p>
-              <p className="text-2xl font-bold text-slate-800 tracking-tight">{headers.length}</p>
+              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-normal mb-1">عدد الأعمدة</p>
+              <p className="text-2xl font-bold text-slate-800 tracking-normal">{headers.length}</p>
             </div>
           </div>
 
           {/* Financial Summary */}
           <section className="bg-white rounded-3xl p-6 border border-slate-200 shadow-sm overflow-hidden relative">
             <div className="absolute top-0 left-0 w-1 h-full bg-indigo-600"></div>
-            <h2 className="text-[10px] font-bold text-slate-400 mb-6 uppercase tracking-wider flex items-center gap-2">
+            <h2 className="text-[10px] font-bold text-slate-400 mb-6 uppercase tracking-normal flex items-center gap-2">
               <BarChart3 size={14} className="text-indigo-600" />
               الملخص المالي {searchQuery.trim() ? '(للنتائج الحالية)' : '(للملف كاملاً)'}
             </h2>
@@ -315,7 +315,7 @@ export default function App() {
                     {totals.amountCol || 'لم يحدد'}
                   </span>
                 </div>
-                <p className="text-3xl font-black text-slate-800 tracking-tight">
+                <p className="text-3xl font-black text-slate-800 tracking-normal">
                   {totals.totalAmount.toLocaleString('ar-SA')} <span className="text-xs font-normal text-slate-400">ر.س</span>
                 </p>
               </div>
@@ -329,7 +329,7 @@ export default function App() {
                     {totals.remainingCol || 'لم يحدد'}
                   </span>
                 </div>
-                <p className="text-3xl font-black text-orange-600 tracking-tight">
+                <p className="text-3xl font-black text-orange-600 tracking-normal">
                   {totals.totalRemaining.toLocaleString('ar-SA')} <span className="text-xs font-normal text-slate-400">ر.س</span>
                 </p>
               </div>
@@ -432,19 +432,19 @@ export default function App() {
                         <div className="w-16 h-16 md:w-20 md:h-20 bg-gradient-to-tr from-indigo-500 to-purple-500 rounded-2xl md:rounded-3xl shadow-lg flex items-center justify-center text-2xl md:text-3xl font-bold text-white uppercase shrink-0">
                           {String(Object.values(row)[0] || '?')[0]}
                         </div>
-                        <div className="flex-1 min-w-0">
+                        <div className="flex-1 min-w-0 text-right">
                           <div className="flex items-center flex-wrap gap-2 md:gap-3 mb-1">
-                            <h2 className="text-xl md:text-2xl font-bold text-slate-800 truncate">{String(Object.values(row).find(v => typeof v === 'string' && v.length > 3) || 'سجل رقم ' + (idx + 1))}</h2>
-                            <span className="px-3 py-0.5 bg-green-100 text-green-700 rounded-full text-[10px] font-bold uppercase tracking-wider">سجل موثق</span>
+                            <h2 className="text-xl md:text-3xl font-bold text-slate-800 truncate">
+                              {String(row[headers[0]] || 'سجل غير معنون')}
+                            </h2>
                           </div>
-                          <p className="text-slate-400 text-sm italic">سجل معرف بـ: {headerLabel(headers[0])} #{idx + 1000}</p>
                         </div>
                       </div>
                       
                       <div className="p-6 md:p-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-y-8 gap-x-12">
                         {headers.map((header) => (
                           <div key={header} className="space-y-1 group">
-                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block transition-colors group-hover:text-indigo-400">
+                            <label className="text-[10px] font-bold text-slate-400 uppercase tracking-normal block transition-colors group-hover:text-indigo-400">
                               {header}
                             </label>
                             <p className="text-base md:text-lg font-semibold text-slate-700 break-all">
@@ -454,11 +454,6 @@ export default function App() {
                         ))}
                       </div>
 
-                      {/* Action Footer */}
-                      <div className="mt-auto p-4 md:p-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3 translate-y-0 shadow-[0_-1px_3px_rgba(0,0,0,0.02)]">
-                        <button className="px-5 py-2 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 text-sm hover:bg-slate-50 transition-colors">عرض التفاصيل</button>
-                        <button className="px-5 py-2 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-sm shadow-indigo-200 hover:bg-indigo-700 transition-colors">تعديل</button>
-                      </div>
                     </motion.div>
                   ))}
                 </div>
@@ -469,7 +464,7 @@ export default function App() {
       </main>
 
       {/* Bottom Status Bar */}
-      <footer className="h-10 bg-slate-800 px-6 flex items-center justify-between text-[10px] text-slate-400 uppercase tracking-widest shrink-0 mt-auto">
+      <footer className="h-10 bg-slate-800 px-6 flex items-center justify-between text-[10px] text-slate-400 uppercase tracking-normal shrink-0 mt-auto">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
             <span className="w-1.5 h-1.5 bg-green-400 rounded-full shadow-[0_0_8px_rgba(74,222,128,0.5)]"></span>
