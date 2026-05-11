@@ -35,6 +35,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [paidRows, setPaidRows] = useState<Set<number>>(new Set());
+  const [editingCell, setEditingCell] = useState<{ row: number; col: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredData = useMemo(() => {
@@ -194,6 +195,16 @@ export default function App() {
       }
       // Persist immediately
       saveToDB(data, headers, fileName || '', Array.from(next) as number[]);
+      return next;
+    });
+  };
+
+  const updateNote = (originalIdx: number, header: string, newValue: string) => {
+    setData(prev => {
+      const next = [...prev];
+      next[originalIdx] = { ...next[originalIdx], [header]: newValue };
+      // Persist the full data and the current paid indices
+      saveToDB(next, headers, fileName || '', Array.from(paidRows));
       return next;
     });
   };
@@ -644,20 +655,42 @@ export default function App() {
                                   {isPaid ? 'تم السداد' : 'تسوية'}
                                 </button>
                               </td>
-                              {headers.map((header) => (
-                                <td 
-                                  key={header} 
-                                  className={`px-6 py-4 text-sm font-medium ${isPaid ? 'text-emerald-700' : 'text-slate-600'} ${
-                                    header.includes('الملاحظات') || header.includes('ملاحظات') || header.includes('notes')
-                                      ? 'whitespace-normal min-w-[300px] break-words'
-                                      : header.includes('الدفع') || header.includes('payment')
-                                      ? 'whitespace-normal min-w-[150px]'
-                                      : 'whitespace-nowrap max-w-[250px] overflow-hidden text-ellipsis'
-                                  }`}
-                                >
-                                  {highlightText(String(row[header] || '-'), searchQuery)}
-                                </td>
-                              ))}
+                              {headers.map((header) => {
+                                const isNoteColumn = header.includes('الملاحظات') || header.includes('ملاحظات') || header.includes('notes');
+                                const isEditing = editingCell?.row === originalIdx && editingCell?.col === header;
+
+                                return (
+                                  <td 
+                                    key={header} 
+                                    onClick={() => isNoteColumn && setEditingCell({ row: originalIdx, col: header })}
+                                    className={`px-6 py-4 text-sm font-medium transition-all ${isPaid ? 'text-emerald-700' : 'text-slate-600'} ${
+                                      isNoteColumn 
+                                        ? 'whitespace-normal min-w-[300px] break-words cursor-pointer hover:bg-slate-50/50' 
+                                        : header.includes('الدفع') || header.includes('payment')
+                                        ? 'whitespace-normal min-w-[150px]'
+                                        : 'whitespace-nowrap max-w-[250px] overflow-hidden text-ellipsis'
+                                    }`}
+                                  >
+                                    {isEditing ? (
+                                      <input 
+                                        autoFocus
+                                        className="w-full bg-white border border-indigo-300 rounded px-2 py-1 outline-none ring-2 ring-indigo-100"
+                                        value={String(row[header] || '')}
+                                        onChange={(e) => updateNote(originalIdx, header, e.target.value)}
+                                        onBlur={() => setEditingCell(null)}
+                                        onKeyDown={(e) => e.key === 'Enter' && setEditingCell(null)}
+                                      />
+                                    ) : (
+                                      <div className="flex items-start justify-between gap-2">
+                                        <span>{highlightText(String(row[header] || '-'), searchQuery)}</span>
+                                        {isNoteColumn && (
+                                          <Info size={12} className="text-slate-300 mt-1 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                        )}
+                                      </div>
+                                    )}
+                                  </td>
+                                );
+                              })}
                             </motion.tr>
                           );
                         })}
