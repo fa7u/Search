@@ -67,6 +67,7 @@ export default function App() {
 
     let totalAmount = 0;
     let totalRemaining = 0;
+    let totalSettled = 0;
 
     currentData.forEach(row => {
       if (amountCol) {
@@ -79,8 +80,17 @@ export default function App() {
       }
     });
 
-    return { totalAmount, totalRemaining, amountCol, remainingCol };
-  }, [data, filteredData, headers, searchQuery]);
+    // Calculate total settled from paidRows
+    paidRows.forEach(idx => {
+      const row = data[idx];
+      if (row && remainingCol) {
+        const val = parseFloat(String(row[remainingCol]).replace(/[^0-9.-]+/g, ''));
+        if (!isNaN(val)) totalSettled += val;
+      }
+    });
+
+    return { totalAmount, totalRemaining, totalSettled, amountCol, remainingCol };
+  }, [data, filteredData, headers, searchQuery, paidRows]);
 
   // Initialize IndexedDB and load saved data
   useEffect(() => {
@@ -440,9 +450,9 @@ export default function App() {
     const summaryRowData = {};
     headers.forEach(h => {
       if (h === totals.amountCol) {
-        summaryRowData[h] = `الإجمالي: ${totals.totalAmount.toLocaleString('ar-SA')} ر.س`;
+        summaryRowData[h] = `إجمالي المبلغ: ${totals.totalAmount.toLocaleString('ar-SA')} ر.س`;
       } else if (h === totals.remainingCol) {
-        summaryRowData[h] = `المتبقي: ${totals.totalRemaining.toLocaleString('ar-SA')} ر.س`;
+        summaryRowData[h] = `إجمالي المتبقي: ${totals.totalRemaining.toLocaleString('ar-SA')} ر.س | المسدد من التحديد: ${totals.totalSettled.toLocaleString('ar-SA')} ر.س`;
       } else if (h === headers[0]) {
         summaryRowData[h] = '--- الملخص الإجمالي ---';
       } else {
@@ -603,6 +613,21 @@ export default function App() {
                 <p className="text-3xl font-black text-orange-600 tracking-normal">
                   {totals.totalRemaining.toLocaleString('ar-SA')} <span className="text-xs font-normal text-slate-400">ر.س</span>
                 </p>
+              </div>
+
+              <div className="h-px bg-slate-100 w-full"></div>
+
+              <div className="flex flex-col">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-sm font-medium text-slate-500">إجمالي مبالغ التسوية</span>
+                  <span className="text-xs bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded-full font-bold">
+                    تم سدادها
+                  </span>
+                </div>
+                <p className="text-3xl font-black text-emerald-600 tracking-normal">
+                  {totals.totalSettled.toLocaleString('ar-SA')} <span className="text-xs font-normal text-slate-400">ر.س</span>
+                </p>
+                <p className="text-[10px] text-slate-400 mt-1 font-bold">مجموع خانة المتبقي للصفوف المختارة</p>
               </div>
             </div>
 
@@ -871,7 +896,7 @@ export default function App() {
                             return (
                               <td key={header} className={`px-6 py-4 text-sm ${isAmount ? 'text-indigo-600' : isRemaining ? 'text-orange-600' : 'text-slate-500'}`}>
                                 {isAmount ? `الإجمالي: ${totals.totalAmount.toLocaleString('ar-SA')} ر.س` : 
-                                 isRemaining ? `المتبقي: ${totals.totalRemaining.toLocaleString('ar-SA')} ر.س` : 
+                                 isRemaining ? `المتبقي: ${totals.totalRemaining.toLocaleString('ar-SA')} ر.س | المسدد حالياً: ${totals.totalSettled.toLocaleString('ar-SA')} ر.س` : 
                                  header === headers[0] ? 'ملخص مالي' : ''}
                               </td>
                             );
