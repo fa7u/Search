@@ -20,7 +20,9 @@ import {
   ChevronRight,
   Database,
   Download,
-  Info
+  Info,
+  RotateCcw,
+  Check
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -30,6 +32,7 @@ interface DataRow {
 
 export default function App() {
   const [data, setData] = useState<DataRow[]>([]);
+  const [originalData, setOriginalData] = useState<DataRow[]>([]);
   const [headers, setHeaders] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -106,20 +109,27 @@ export default function App() {
           getRequest.onsuccess = () => {
             if (getRequest.result) {
               const res = getRequest.result as { 
-                data: DataRow[], 
-                headers: string[], 
-                fileName: string, 
-                paidIndices?: number[], 
-                modifiedIndices?: number[],
-                isModified?: boolean 
-              };
-              const { data: savedData, headers: savedHeaders, fileName: savedName, paidIndices, modifiedIndices, isModified: savedModified } = res;
-              setData(savedData);
-              setHeaders(savedHeaders);
-              setFileName(savedName);
-              if (paidIndices) setPaidRows(new Set(paidIndices));
-              if (modifiedIndices) setModifiedRows(new Set(modifiedIndices));
-              if (savedModified) setIsModified(savedModified);
+              data: DataRow[], 
+              originalData?: DataRow[],
+              headers: string[], 
+              fileName: string, 
+              paidIndices?: number[], 
+              modifiedIndices?: number[],
+              isModified?: boolean 
+            };
+            const { data: savedData, originalData: savedOriginal, headers: savedHeaders, fileName: savedName, paidIndices, modifiedIndices, isModified: savedModified } = res;
+            setData(savedData);
+            // Fallback: if no original data was saved, treat current data as original
+            if (savedOriginal && savedOriginal.length > 0) {
+              setOriginalData(savedOriginal);
+            } else if (savedData && savedData.length > 0) {
+              setOriginalData(JSON.parse(JSON.stringify(savedData)));
+            }
+            setHeaders(savedHeaders);
+            setFileName(savedName);
+            if (paidIndices) setPaidRows(new Set(paidIndices));
+            if (modifiedIndices) setModifiedRows(new Set(modifiedIndices));
+            if (savedModified) setIsModified(savedModified);
             }
             setIsLoading(false);
           };
@@ -153,16 +163,31 @@ export default function App() {
   }, [searchQuery]);
 
   // Save to IndexedDB helper
-  const saveToDB = (fileData: DataRow[], fileHeaders: string[], name: string, paidIndices: number[] = [], modifiedIndices: number[] = [], modified = false) => {
+  const saveToDB = (
+    fileData: DataRow[], 
+    fileHeaders: string[], 
+    name: string, 
+    paidIndices: number[] = [], 
+    modifiedIndices: number[] = [], 
+    modified = false, 
+    original: DataRow[] | null = null
+  ) => {
     try {
       const dbRequest = indexedDB.open('FileSearchDB', 1);
       dbRequest.onsuccess = (e: any) => {
         const db = e.target.result;
         const transaction = db.transaction(['files'], 'readwrite');
         const store = transaction.objectStore('files');
+        
+        // Ensure we always have some original data to save
+        const dataToSaveAsOriginal = (original && original.length > 0) 
+          ? original 
+          : (originalData && originalData.length > 0 ? originalData : fileData);
+
         store.put({
           id: 'current_file',
           data: fileData,
+          originalData: dataToSaveAsOriginal,
           headers: fileHeaders,
           fileName: name,
           paidIndices: paidIndices,
@@ -208,25 +233,61 @@ export default function App() {
       }
       setIsModified(true);
       // Persist immediately
-      saveToDB(data, headers, fileName || '', Array.from(next) as number[], Array.from(modifiedRows) as number[], true);
+      saveToDB(data, headers, fileName || '', Array.from(next) as number[], Array.from(modifiedRows) as number[], true, originalData);
       return next;
     });
   };
 
   const updateNote = (originalIdx: number, header: string, newValue: string) => {
-    setData(prev => {
-      const next = [...prev];
-      next[originalIdx] = { ...next[originalIdx], [header]: newValue };
-      setIsModified(true);
-      
-      const newModifiedRows = new Set(modifiedRows);
-      newModifiedRows.add(originalIdx);
-      setModifiedRows(newModifiedRows);
+    // 1. Update local state for immediate feedback
+    const nextData = [...data];
+    nextData[originalIdx] = { ...nextData[originalIdx], [header]: newValue };
+    setData(nextData);
+    
+    // 2. Track modification
+    const newModifiedRows = new Set(modifiedRows);
+    newModifiedRows.add(originalIdx);
+    setModifiedRows(newModifiedRows);
+    setIsModified(true);
 
-      // Persist
-      saveToDB(next, headers, fileName || '', Array.from(paidRows) as number[], Array.from(newModifiedRows) as number[], true);
-      return next;
-    });
+    // 3. Persist to DB
+    saveToDB(
+      nextData, 
+      headers, 
+      fileName || '', 
+      Array.from(paidRows) as number[], 
+      Array.from(newModifiedRows) as number[], 
+      true, 
+      originalData
+    );
+  };
+
+  const undoRowChanges = (originalIdx: number) => {
+    if (originalData[originalIdx]) {
+      // 1. Restore from original
+      const nextData = [...data];
+      nextData[originalIdx] = { ...originalData[originalIdx] };
+      setData(nextData);
+      
+      // 2. Remove from modified
+      const newModifiedRows = new Set(modifiedRows);
+      newModifiedRows.delete(originalIdx);
+      setModifiedRows(newModifiedRows);
+      
+      const stillModified = newModifiedRows.size > 0 || paidRows.size > 0;
+      setIsModified(stillModified);
+
+      // 3. Persist back
+      saveToDB(
+        nextData, 
+        headers, 
+        fileName || '', 
+        Array.from(paidRows) as number[], 
+        Array.from(newModifiedRows) as number[], 
+        stillModified, 
+        originalData
+      );
+    }
   };
 
   const processFile = (file: File) => {
@@ -245,10 +306,11 @@ export default function App() {
           const newHeaders = Object.keys(jsonData[0]);
           setHeaders(newHeaders);
           setData(jsonData);
+          setOriginalData(JSON.parse(JSON.stringify(jsonData)));
           setPaidRows(new Set());
           setModifiedRows(new Set());
           setIsModified(false);
-          saveToDB(jsonData, newHeaders, file.name, [], [], false);
+          saveToDB(jsonData, newHeaders, file.name, [], [], false, JSON.parse(JSON.stringify(jsonData)));
         } else {
           alert('الملف فارغ أو لا يحتوي على بيانات صحيحة.');
         }
@@ -729,17 +791,29 @@ export default function App() {
                               <td className={`px-6 py-4 text-xs font-medium text-center ${numBgClass}`}>
                                 {idx + 1}
                               </td>
-                              <td className="px-4 py-2 text-center">
-                                <button
-                                  onClick={() => togglePaid(originalIdx)}
-                                  className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all ${
-                                    isPaid 
-                                      ? 'bg-emerald-500 text-white shadow-sm' 
-                                      : 'bg-slate-100 text-slate-500 hover:bg-emerald-500 hover:text-white'
-                                  }`}
-                                >
-                                  {isPaid ? 'تم السداد' : 'تسوية'}
-                                </button>
+                               <td className="px-4 py-2 text-center">
+                                <div className="flex flex-col items-center gap-2">
+                                  <button
+                                    onClick={() => togglePaid(originalIdx)}
+                                    className={`px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all w-full max-w-[60px] ${
+                                      isPaid 
+                                        ? 'bg-emerald-500 text-white shadow-sm' 
+                                        : 'bg-slate-100 text-slate-500 hover:bg-emerald-500 hover:text-white'
+                                    }`}
+                                  >
+                                    {isPaid ? 'تم السداد' : 'تسوية'}
+                                  </button>
+                                  {modifiedRows.has(originalIdx) && (
+                                    <button 
+                                      onClick={() => undoRowChanges(originalIdx)}
+                                      className="flex items-center gap-1 text-[9px] text-orange-500 hover:text-orange-600 font-bold bg-orange-50 px-2 py-0.5 rounded transition-colors"
+                                      title="تراجع عن التعديل"
+                                    >
+                                      <RotateCcw size={10} />
+                                      <span>تراجع</span>
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                               {headers.map((header) => {
                                 const isNoteColumn = header.includes('الملاحظات') || header.includes('ملاحظات') || header.includes('notes');
