@@ -603,31 +603,37 @@ export default function App() {
 
               <div className="h-px bg-slate-100 w-full"></div>
 
-              <div className="flex flex-col">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium text-slate-500">إجمالي المتبقي</span>
-                  <span className="text-xs bg-orange-50 text-orange-600 px-2 py-0.5 rounded-full font-bold">
-                    {totals.remainingCol || 'لم يحدد'}
-                  </span>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="flex flex-col bg-orange-50/50 p-3 rounded-2xl border border-orange-100">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-medium text-orange-700">إجمالي المتبقي</span>
+                    <span className="text-[9px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-bold">
+                      {totals.remainingCol || 'لم يحدد'}
+                    </span>
+                  </div>
+                  <p className="text-xl font-black text-orange-600 tracking-tight">
+                    {totals.totalRemaining.toLocaleString('ar-SA')} <span className="text-[10px] font-normal text-orange-400">ر.س</span>
+                  </p>
                 </div>
-                <p className="text-3xl font-black text-orange-600 tracking-normal">
-                  {totals.totalRemaining.toLocaleString('ar-SA')} <span className="text-xs font-normal text-slate-400">ر.س</span>
-                </p>
+
+                <div className="flex flex-col bg-emerald-50/50 p-3 rounded-2xl border border-emerald-100">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-medium text-emerald-700">إجمالي مبالغ التسوية</span>
+                    <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-bold">
+                      تم سدادها
+                    </span>
+                  </div>
+                  <p className="text-xl font-black text-emerald-600 tracking-tight">
+                    {totals.totalSettled.toLocaleString('ar-SA')} <span className="text-[10px] font-normal text-emerald-400">ر.س</span>
+                  </p>
+                </div>
               </div>
 
-              <div className="h-px bg-slate-100 w-full"></div>
-
-              <div className="flex flex-col">
-                <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium text-slate-500">إجمالي مبالغ التسوية</span>
-                  <span className="text-xs bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded-full font-bold">
-                    تم سدادها
-                  </span>
-                </div>
-                <p className="text-3xl font-black text-emerald-600 tracking-normal">
-                  {totals.totalSettled.toLocaleString('ar-SA')} <span className="text-xs font-normal text-slate-400">ر.س</span>
+              <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                <p className="text-[10px] text-slate-500 font-bold flex items-center gap-2">
+                  <Info size={12} className="text-indigo-500" />
+                  المسدد: مجموع المتبقي للصفوف المختارة
                 </p>
-                <p className="text-[10px] text-slate-400 mt-1 font-bold">مجموع خانة المتبقي للصفوف المختارة</p>
               </div>
             </div>
 
@@ -895,9 +901,28 @@ export default function App() {
                             
                             return (
                               <td key={header} className={`px-6 py-4 text-sm ${isAmount ? 'text-indigo-600' : isRemaining ? 'text-orange-600' : 'text-slate-500'}`}>
-                                {isAmount ? `الإجمالي: ${totals.totalAmount.toLocaleString('ar-SA')} ر.س` : 
-                                 isRemaining ? `المتبقي: ${totals.totalRemaining.toLocaleString('ar-SA')} ر.س | المسدد حالياً: ${totals.totalSettled.toLocaleString('ar-SA')} ر.س` : 
-                                 header === headers[0] ? 'ملخص مالي' : ''}
+                                {isAmount ? (
+                                  <div className="flex items-center gap-2 whitespace-nowrap">
+                                    <span className="text-[10px] text-slate-400 font-normal">إجمالي المبلغ:</span>
+                                    <span>{totals.totalAmount.toLocaleString('ar-SA')} ر.س</span>
+                                  </div>
+                                ) : isRemaining ? (
+                                  <div className="flex items-center gap-4 whitespace-nowrap">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] text-slate-400 font-normal">المتبقي:</span>
+                                      <span>{totals.totalRemaining.toLocaleString('ar-SA')} ر.س</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded-lg border border-emerald-100">
+                                      <span className="text-[10px] opacity-70">المسدد حالياً:</span>
+                                      <span className="font-bold">{totals.totalSettled.toLocaleString('ar-SA')} ر.س</span>
+                                    </div>
+                                  </div>
+                                ) : header === headers[0] ? (
+                                  <div className="flex items-center gap-2 text-indigo-600">
+                                    <BarChart3 size={14} />
+                                    <span>ملخص مالي</span>
+                                  </div>
+                                ) : ''}
                               </td>
                             );
                           })}
