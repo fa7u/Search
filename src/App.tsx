@@ -35,6 +35,7 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [fileName, setFileName] = useState<string | null>(null);
   const [paidRows, setPaidRows] = useState<Set<number>>(new Set());
+  const [modifiedRows, setModifiedRows] = useState<Set<number>>(new Set());
   const [editingCell, setEditingCell] = useState<{ row: number; col: string } | null>(null);
   const [isModified, setIsModified] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -104,12 +105,20 @@ export default function App() {
 
           getRequest.onsuccess = () => {
             if (getRequest.result) {
-              const res = getRequest.result as { data: DataRow[], headers: string[], fileName: string, paidIndices?: number[], isModified?: boolean };
-              const { data: savedData, headers: savedHeaders, fileName: savedName, paidIndices, isModified: savedModified } = res;
+              const res = getRequest.result as { 
+                data: DataRow[], 
+                headers: string[], 
+                fileName: string, 
+                paidIndices?: number[], 
+                modifiedIndices?: number[],
+                isModified?: boolean 
+              };
+              const { data: savedData, headers: savedHeaders, fileName: savedName, paidIndices, modifiedIndices, isModified: savedModified } = res;
               setData(savedData);
               setHeaders(savedHeaders);
               setFileName(savedName);
               if (paidIndices) setPaidRows(new Set(paidIndices));
+              if (modifiedIndices) setModifiedRows(new Set(modifiedIndices));
               if (savedModified) setIsModified(savedModified);
             }
             setIsLoading(false);
@@ -144,7 +153,7 @@ export default function App() {
   }, [searchQuery]);
 
   // Save to IndexedDB helper
-  const saveToDB = (fileData: DataRow[], fileHeaders: string[], name: string, paidIndices: number[] = [], modified = false) => {
+  const saveToDB = (fileData: DataRow[], fileHeaders: string[], name: string, paidIndices: number[] = [], modifiedIndices: number[] = [], modified = false) => {
     try {
       const dbRequest = indexedDB.open('FileSearchDB', 1);
       dbRequest.onsuccess = (e: any) => {
@@ -157,6 +166,7 @@ export default function App() {
           headers: fileHeaders,
           fileName: name,
           paidIndices: paidIndices,
+          modifiedIndices: modifiedIndices,
           isModified: modified,
           updatedAt: new Date().toISOString()
         });
@@ -198,7 +208,7 @@ export default function App() {
       }
       setIsModified(true);
       // Persist immediately
-      saveToDB(data, headers, fileName || '', Array.from(next) as number[], true);
+      saveToDB(data, headers, fileName || '', Array.from(next) as number[], Array.from(modifiedRows) as number[], true);
       return next;
     });
   };
@@ -208,8 +218,13 @@ export default function App() {
       const next = [...prev];
       next[originalIdx] = { ...next[originalIdx], [header]: newValue };
       setIsModified(true);
-      // Persist the full data and the current paid indices
-      saveToDB(next, headers, fileName || '', Array.from(paidRows) as number[], true);
+      
+      const newModifiedRows = new Set(modifiedRows);
+      newModifiedRows.add(originalIdx);
+      setModifiedRows(newModifiedRows);
+
+      // Persist
+      saveToDB(next, headers, fileName || '', Array.from(paidRows) as number[], Array.from(newModifiedRows) as number[], true);
       return next;
     });
   };
@@ -231,8 +246,9 @@ export default function App() {
           setHeaders(newHeaders);
           setData(jsonData);
           setPaidRows(new Set());
+          setModifiedRows(new Set());
           setIsModified(false);
-          saveToDB(jsonData, newHeaders, file.name, [], false);
+          saveToDB(jsonData, newHeaders, file.name, [], [], false);
         } else {
           alert('الملف فارغ أو لا يحتوي على بيانات صحيحة.');
         }
@@ -252,6 +268,7 @@ export default function App() {
     setSearchQuery('');
     setFileName(null);
     setPaidRows(new Set());
+    setModifiedRows(new Set());
     setIsModified(false);
     removeFromDB();
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -331,7 +348,20 @@ export default function App() {
       const rowData = dataToExport[R - 1];
       const originalIdx = data.findIndex(r => r === rowData);
       const isPaid = paidRows.has(originalIdx);
-      const rowBgColor = isPaid ? "D1FAE5" : "FFFFFF"; 
+      const isModifiedRow = modifiedRows.has(originalIdx);
+      
+      let rowBgColor = "FFFFFF";
+      if (isPaid) {
+        rowBgColor = "D1FAE5"; // Emerald 100
+      } else if (isModifiedRow) {
+        // Check if notes column contains "تصفية"
+        const rowString = JSON.stringify(rowData);
+        if (rowString.includes('تصفية')) {
+          rowBgColor = "FECACA"; // Red 200 for Tasfya
+        } else {
+          rowBgColor = "DBEAFE"; // Blue 100 for general edit
+        }
+      }
 
       for (let C = range.s.c; C <= range.e.c; ++C) {
         const address = XLSX.utils.encode_cell({ r: R, c: C });
@@ -613,12 +643,12 @@ export default function App() {
                   </div>
                   <div className="flex gap-2">
                     <button 
-                      onClick={exportToExcel}
+                      onClick={() => exportToExcel(false)}
                       className="px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-md flex items-center gap-2 group"
-                      title="تحميل ملف Excel"
+                      title="تحميل نتائج البحث الحالية"
                     >
                       <Download size={18} className="group-hover:translate-y-0.5 transition-transform" />
-                      <span className="text-sm font-bold">تحميل excel</span>
+                      <span className="text-sm font-bold">تحميل النتائج</span>
                     </button>
                   </div>
                 </div>
@@ -663,6 +693,30 @@ export default function App() {
                           // Find original index in 'data' to maintain status correctly
                           const originalIdx = data.findIndex(r => r === row);
                           const isPaid = paidRows.has(originalIdx);
+                          const isModifiedRow = modifiedRows.has(originalIdx);
+                          
+                          // Styling classes based on status
+                          let rowBgClass = "hover:bg-indigo-50/30";
+                          let textClass = "text-slate-600";
+                          let numBgClass = "text-slate-400 bg-slate-50/30";
+                          
+                          if (isPaid) {
+                            rowBgClass = "bg-emerald-50 hover:bg-emerald-100/80";
+                            textClass = "text-emerald-700 font-bold";
+                            numBgClass = "text-emerald-500 bg-emerald-50/50";
+                          } else if (isModifiedRow) {
+                            // Find any note-like field and check for "تصفية"
+                            const rowString = JSON.stringify(row);
+                            if (rowString.includes('تصفية')) {
+                              rowBgClass = "bg-red-50/70 hover:bg-red-100/70 border-r-4 border-r-red-400";
+                              textClass = "text-red-700 font-bold";
+                              numBgClass = "text-red-500 bg-red-100/50";
+                            } else {
+                              rowBgClass = "bg-blue-50/70 hover:bg-blue-100/70 border-r-4 border-r-blue-400";
+                              textClass = "text-blue-700 font-bold";
+                              numBgClass = "text-blue-500 bg-blue-100/50";
+                            }
+                          }
                           
                           return (
                             <motion.tr
@@ -670,9 +724,9 @@ export default function App() {
                               initial={{ opacity: 0 }}
                               animate={{ opacity: 1 }}
                               transition={{ delay: Math.min(idx * 0.01, 0.2) }}
-                              className={`transition-colors group ${isPaid ? 'bg-emerald-50 hover:bg-emerald-100/80' : 'hover:bg-indigo-50/30'}`}
+                              className={`transition-colors group ${rowBgClass}`}
                             >
-                              <td className={`px-6 py-4 text-xs font-medium text-center ${isPaid ? 'text-emerald-500 bg-emerald-50/50' : 'text-slate-400 bg-slate-50/30'}`}>
+                              <td className={`px-6 py-4 text-xs font-medium text-center ${numBgClass}`}>
                                 {idx + 1}
                               </td>
                               <td className="px-4 py-2 text-center">
@@ -691,13 +745,16 @@ export default function App() {
                                 const isNoteColumn = header.includes('الملاحظات') || header.includes('ملاحظات') || header.includes('notes');
                                 const isEditing = editingCell?.row === originalIdx && editingCell?.col === header;
 
+                                const isAmount = header === totals.amountCol;
+                                const isRemaining = header === totals.remainingCol;
+
                                 return (
                                   <td 
                                     key={header} 
                                     onClick={() => isNoteColumn && setEditingCell({ row: originalIdx, col: header })}
-                                    className={`px-6 py-4 text-sm font-medium transition-all ${isPaid ? 'text-emerald-700' : 'text-slate-600'} ${
+                                    className={`px-6 py-4 text-sm font-medium transition-all ${textClass} ${
                                       isNoteColumn 
-                                        ? 'whitespace-normal min-w-[300px] break-words cursor-pointer hover:bg-slate-50/50' 
+                                        ? 'whitespace-normal min-w-[300px] break-words cursor-pointer' 
                                         : header.includes('الدفع') || header.includes('payment')
                                         ? 'whitespace-normal min-w-[150px]'
                                         : 'whitespace-nowrap max-w-[250px] overflow-hidden text-ellipsis'
