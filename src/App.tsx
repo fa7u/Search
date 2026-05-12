@@ -67,9 +67,13 @@ export default function App() {
 
     let totalAmount = 0;
     let totalRemaining = 0;
-    let totalSettled = 0;
+    let totalSettledFiltered = 0;
+    let totalSettledGlobal = 0;
 
     currentData.forEach(row => {
+      const originalIdx = data.findIndex(r => r === row);
+      const isPaid = paidRows.has(originalIdx);
+
       if (amountCol) {
         const val = parseFloat(String(row[amountCol]).replace(/[^0-9.-]+/g, ''));
         if (!isNaN(val)) totalAmount += val;
@@ -77,19 +81,24 @@ export default function App() {
       if (remainingCol) {
         const val = parseFloat(String(row[remainingCol]).replace(/[^0-9.-]+/g, ''));
         if (!isNaN(val)) totalRemaining += val;
+        
+        // Only add to summary if this row is paid AND matches search results
+        if (isPaid && !isNaN(val)) {
+          totalSettledFiltered += val;
+        }
       }
     });
 
-    // Calculate total settled from paidRows
+    // Calculate total settled GLOBAL (Entire file) for Dashboard
     paidRows.forEach(idx => {
       const row = data[idx];
       if (row && remainingCol) {
         const val = parseFloat(String(row[remainingCol]).replace(/[^0-9.-]+/g, ''));
-        if (!isNaN(val)) totalSettled += val;
+        if (!isNaN(val)) totalSettledGlobal += val;
       }
     });
 
-    return { totalAmount, totalRemaining, totalSettled, amountCol, remainingCol };
+    return { totalAmount, totalRemaining, totalSettledGlobal, totalSettledFiltered, amountCol, remainingCol };
   }, [data, filteredData, headers, searchQuery, paidRows]);
 
   // Initialize IndexedDB and load saved data
@@ -452,18 +461,21 @@ export default function App() {
     const hasNextCol = settledColIndex < headers.length;
     const nextColHeader = hasNextCol ? headers[settledColIndex] : null;
 
+    const settledToDisplay = isExportAll ? totals.totalSettledGlobal : totals.totalSettledFiltered;
+    const settledLabel = isExportAll ? "المسدد الإجمالي" : "المسدد حالياً";
+
     headers.forEach((h) => {
       if (h === totals.amountCol) {
         summaryRowData[h] = `إجمالي المبلغ: ${totals.totalAmount.toLocaleString('ar-SA')} ر.س`;
       } else if (h === totals.remainingCol) {
         summaryRowData[h] = `إجمالي المتبقي: ${totals.totalRemaining.toLocaleString('ar-SA')} ر.س`;
         // If we can't use next column, append it here
-        if (!nextColHeader && totals.totalSettled > 0) {
-          summaryRowData[h] += ` | المسدد: ${totals.totalSettled.toLocaleString('ar-SA')} ر.س`;
+        if (!nextColHeader && settledToDisplay > 0) {
+          summaryRowData[h] += ` | ${settledLabel}: ${settledToDisplay.toLocaleString('ar-SA')} ر.س`;
         }
-      } else if (nextColHeader && h === nextColHeader && totals.totalSettled > 0) {
+      } else if (nextColHeader && h === nextColHeader && settledToDisplay > 0) {
         // If the column after 'remaining' is available, use it for settled amount to avoid overlap
-        summaryRowData[h] = `المسدد حالياً: ${totals.totalSettled.toLocaleString('ar-SA')} ر.س`;
+        summaryRowData[h] = `${settledLabel}: ${settledToDisplay.toLocaleString('ar-SA')} ر.س`;
       } else if (h === headers[0]) {
         summaryRowData[h] = '--- الملخص الإجمالي ---';
       } else {
@@ -486,7 +498,7 @@ export default function App() {
           worksheet[address].s = highlightStyle("4F46E5"); 
         } else if (header === totals.remainingCol) {
           worksheet[address].s = highlightStyle("EA580C"); 
-        } else if (nextColHeader && header === nextColHeader && totals.totalSettled > 0) {
+        } else if (nextColHeader && header === nextColHeader && settledToDisplay > 0) {
           worksheet[address].s = highlightStyle("10B981"); // Emerald 500 for settled
         } else {
           worksheet[address].s = summaryStyle;
@@ -645,7 +657,7 @@ export default function App() {
                     </span>
                   </div>
                   <p className="text-xl font-black text-emerald-600 tracking-tight">
-                    {totals.totalSettled.toLocaleString('ar-SA')} <span className="text-[10px] font-normal text-emerald-400">ر.س</span>
+                    {totals.totalSettledGlobal.toLocaleString('ar-SA')} <span className="text-[10px] font-normal text-emerald-400">ر.س</span>
                   </p>
                 </div>
               </div>
@@ -653,7 +665,7 @@ export default function App() {
               <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
                 <p className="text-[10px] text-slate-500 font-bold flex items-center gap-2">
                   <Info size={12} className="text-indigo-500" />
-                  المسدد: مجموع المتبقي للصفوف المختارة
+                  المسدد اﻹجمالي: للفترة بالكامل | المسدد حالياً: للبحث الحالي
                 </p>
               </div>
             </div>
@@ -935,7 +947,7 @@ export default function App() {
                                     </div>
                                     <div className="flex items-center gap-2 bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded-lg border border-emerald-100">
                                       <span className="text-[10px] opacity-70">المسدد حالياً:</span>
-                                      <span className="font-bold">{totals.totalSettled.toLocaleString('ar-SA')} ر.س</span>
+                                      <span className="font-bold">{totals.totalSettledFiltered.toLocaleString('ar-SA')} ر.س</span>
                                     </div>
                                   </div>
                                 ) : header === headers[0] ? (
