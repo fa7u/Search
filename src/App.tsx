@@ -448,11 +448,22 @@ export default function App() {
 
     // 6. Add Summary Row
     const summaryRowData = {};
-    headers.forEach(h => {
+    const settledColIndex = headers.indexOf(totals.remainingCol || '') + 1;
+    const hasNextCol = settledColIndex < headers.length;
+    const nextColHeader = hasNextCol ? headers[settledColIndex] : null;
+
+    headers.forEach((h) => {
       if (h === totals.amountCol) {
         summaryRowData[h] = `إجمالي المبلغ: ${totals.totalAmount.toLocaleString('ar-SA')} ر.س`;
       } else if (h === totals.remainingCol) {
-        summaryRowData[h] = `إجمالي المتبقي: ${totals.totalRemaining.toLocaleString('ar-SA')} ر.س | المسدد من التحديد: ${totals.totalSettled.toLocaleString('ar-SA')} ر.س`;
+        summaryRowData[h] = `إجمالي المتبقي: ${totals.totalRemaining.toLocaleString('ar-SA')} ر.س`;
+        // If we can't use next column, append it here
+        if (!nextColHeader && totals.totalSettled > 0) {
+          summaryRowData[h] += ` | المسدد: ${totals.totalSettled.toLocaleString('ar-SA')} ر.س`;
+        }
+      } else if (nextColHeader && h === nextColHeader && totals.totalSettled > 0) {
+        // If the column after 'remaining' is available, use it for settled amount to avoid overlap
+        summaryRowData[h] = `المسدد حالياً: ${totals.totalSettled.toLocaleString('ar-SA')} ر.س`;
       } else if (h === headers[0]) {
         summaryRowData[h] = '--- الملخص الإجمالي ---';
       } else {
@@ -475,6 +486,8 @@ export default function App() {
           worksheet[address].s = highlightStyle("4F46E5"); 
         } else if (header === totals.remainingCol) {
           worksheet[address].s = highlightStyle("EA580C"); 
+        } else if (nextColHeader && header === nextColHeader && totals.totalSettled > 0) {
+          worksheet[address].s = highlightStyle("10B981"); // Emerald 500 for settled
         } else {
           worksheet[address].s = summaryStyle;
         }
@@ -484,10 +497,18 @@ export default function App() {
     // 7. Config widths & RTL
     const wscols = headers.map(h => {
       const hLower = h.toLowerCase();
-      if (hLower.includes('ملاحظات')) return { wch: 50 };
-      if (hLower.includes('اسم') || hLower.includes('عقار')) return { wch: 35 };
-      if (hLower.includes('دفع') || hLower.includes('تاريخ')) return { wch: 25 };
-      return { wch: 18 };
+      let w = 18;
+      if (hLower.includes('ملاحظات')) w = 50;
+      else if (hLower.includes('اسم') || hLower.includes('عقار')) w = 35;
+      else if (hLower.includes('دفع') || hLower.includes('تاريخ')) w = 25;
+      
+      // Ensure summary row text fits
+      const cellValue = summaryRowData[h] || '';
+      if (cellValue.length > w) {
+        w = Math.min(cellValue.length + 5, 80); // Max 80 width
+      }
+      
+      return { wch: w };
     });
     worksheet['!cols'] = wscols;
     worksheet['!views'] = [{ RTL: true }];
