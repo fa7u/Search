@@ -41,22 +41,57 @@ export default function App() {
   const [modifiedRows, setModifiedRows] = useState<Set<number>>(new Set());
   const [editingCell, setEditingCell] = useState<{ row: number; col: string } | null>(null);
   const [isModified, setIsModified] = useState(false);
+  const [filterType, setFilterType] = useState<'all' | 'paid' | 'modified' | 'normal'>('all');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const filteredData = useMemo(() => {
-    if (!searchQuery.trim()) return [];
+  // 1. First, find matches just for the search query
+  const searchMatches = useMemo(() => {
+    if (!searchQuery.trim()) return data;
     const query = searchQuery.toLowerCase();
-    const results = data.filter(row => {
+    return data.filter(row => {
       return Object.values(row).some(value => 
         String(value || '').toLowerCase().includes(query)
       );
     });
-    return results;
   }, [data, searchQuery]);
+
+  // 2. Use those matches to figure out the counts for each filter button based on current search
+  const filterCounts = useMemo(() => {
+    const counts = { all: searchMatches.length, paid: 0, modified: 0, normal: 0 };
+    searchMatches.forEach(row => {
+      const originalIdx = data.indexOf(row);
+      const isPaid = paidRows.has(originalIdx);
+      const isModified = modifiedRows.has(originalIdx);
+      if (isPaid) counts.paid++;
+      else if (isModified) counts.modified++;
+      else counts.normal++;
+    });
+    return counts;
+  }, [searchMatches, data, paidRows, modifiedRows]);
+
+  const filteredData = useMemo(() => {
+    let results = searchMatches;
+    
+    // Apply status filter on top of search matches
+    if (filterType !== 'all') {
+      results = results.filter((row) => {
+        const originalIdx = data.indexOf(row);
+        if (filterType === 'paid') return paidRows.has(originalIdx);
+        if (filterType === 'modified') return modifiedRows.has(originalIdx);
+        if (filterType === 'normal') return !paidRows.has(originalIdx) && !modifiedRows.has(originalIdx);
+        return true;
+      });
+    }
+    
+    return results;
+  }, [searchMatches, filterType, data, paidRows, modifiedRows]);
 
   // Financial Summary Calculation
   const totals = useMemo(() => {
-    const currentData = searchQuery.trim() ? filteredData : data;
+    // Global totals for the entire file
+    const allData = data;
+    // Filtered data for "settled currently"
+    const currentOnScreenData = filteredData;
     
     // Attempt to find columns for Amount and Remaining
     const amountKeywords = ['مبلغ', 'المبلغ', 'قيمة', 'القيمة', 'amount', 'total', 'price', 'السعر'];
@@ -64,16 +99,19 @@ export default function App() {
 
     const amountCol = headers.find(h => amountKeywords.some(k => h.toLowerCase().includes(k)));
     const remainingCol = headers.find(h => remainingKeywords.some(k => h.toLowerCase().includes(k)));
+    const notesKeywords = ['ملاحظات', 'ملاحظة', 'التفاصيل', 'notes', 'observation', 'comment'];
+    const notesCol = headers.find(h => notesKeywords.some(k => h.toLowerCase().includes(k)));
 
     let totalAmount = 0;
     let totalRemaining = 0;
+    let totalAmountFiltered = 0;
+    let totalRemainingFiltered = 0;
     let totalSettledFiltered = 0;
     let totalSettledGlobal = 0;
+    let totalLiquidationFiltered = 0;
 
-    currentData.forEach(row => {
-      const originalIdx = data.findIndex(r => r === row);
-      const isPaid = paidRows.has(originalIdx);
-
+    // 1. Calculate Global Totals (Entire File)
+    allData.forEach(row => {
       if (amountCol) {
         const val = parseFloat(String(row[amountCol]).replace(/[^0-9.-]+/g, ''));
         if (!isNaN(val)) totalAmount += val;
@@ -81,15 +119,42 @@ export default function App() {
       if (remainingCol) {
         const val = parseFloat(String(row[remainingCol]).replace(/[^0-9.-]+/g, ''));
         if (!isNaN(val)) totalRemaining += val;
-        
-        // Only add to summary if this row is paid AND matches search results
-        if (isPaid && !isNaN(val)) {
-          totalSettledFiltered += val;
+      }
+    });
+
+    // 2. Calculate Filtered Totals (Only rows matching current search/filter)
+    currentOnScreenData.forEach(row => {
+      const originalIdx = data.indexOf(row);
+      const isPaid = paidRows.has(originalIdx);
+
+      if (amountCol) {
+        const val = parseFloat(String(row[amountCol]).replace(/[^0-9.-]+/g, ''));
+        if (!isNaN(val)) totalAmountFiltered += val;
+      }
+
+      if (remainingCol) {
+        const val = parseFloat(String(row[remainingCol]).replace(/[^0-9.-]+/g, ''));
+        if (!isNaN(val)) {
+          totalRemainingFiltered += val;
+          // Only add to settled if this row is paid
+          if (isPaid) {
+            totalSettledFiltered += val;
+          }
+          
+          // Calculate Liquidation (تصفية)
+          // Search in notesCol or any available column for the word "تصفية"
+          const hasTasfya = notesCol 
+            ? String(row[notesCol] || '').includes('تصفية')
+            : Object.values(row).some(v => String(v || '').includes('تصفية'));
+            
+          if (hasTasfya) {
+            totalLiquidationFiltered += val;
+          }
         }
       }
     });
 
-    // Calculate total settled GLOBAL (Entire file) for Dashboard
+    // 3. Calculate total settled GLOBAL (Entire file)
     paidRows.forEach(idx => {
       const row = data[idx];
       if (row && remainingCol) {
@@ -98,8 +163,18 @@ export default function App() {
       }
     });
 
-    return { totalAmount, totalRemaining, totalSettledGlobal, totalSettledFiltered, amountCol, remainingCol };
-  }, [data, filteredData, headers, searchQuery, paidRows]);
+    return { 
+      totalAmount, 
+      totalRemaining, 
+      totalAmountFiltered,
+      totalRemainingFiltered,
+      totalSettledGlobal, 
+      totalSettledFiltered, 
+      totalLiquidationFiltered,
+      amountCol, 
+      remainingCol 
+    };
+  }, [data, filteredData, headers, paidRows]);
 
   // Initialize IndexedDB and load saved data
   useEffect(() => {
@@ -370,9 +445,8 @@ export default function App() {
 
   const exportToExcel = (forceAll = false) => {
     // 1. Decide which data set to export
-    // If forceAll is true, take the entire 'data' array. 
-    // Otherwise, check if there's a search query to take filteredData.
-    const isExportAll = forceAll || !searchQuery.trim();
+    // Export all if forced OR (no search AND no specific filter active)
+    const isExportAll = forceAll || (!searchQuery.trim() && filterType === 'all');
     const dataToExport = isExportAll ? data : filteredData;
     
     if (dataToExport.length === 0) return;
@@ -462,13 +536,23 @@ export default function App() {
     const nextColHeader = hasNextCol ? headers[settledColIndex] : null;
 
     const settledToDisplay = isExportAll ? totals.totalSettledGlobal : totals.totalSettledFiltered;
+    const liquidationToDisplay = isExportAll ? 0 : totals.totalLiquidationFiltered; // Usually meaningful only for current results
+    const amountToDisplay = isExportAll ? totals.totalAmount : totals.totalAmountFiltered;
+    const remainingToDisplay = isExportAll ? totals.totalRemaining : totals.totalRemainingFiltered;
+    
     const settledLabel = isExportAll ? "المسدد الإجمالي" : "المسدد حالياً";
+    const liquidationLabel = "إجمالي التصفية";
+    const amountLabel = isExportAll ? "إجمالي المبلغ" : "إجمالي المبالغ المعروضة";
+    const remainingLabel = isExportAll ? "إجمالي المتبقي" : "المتبقي (للبحث الحالي)";
 
     headers.forEach((h) => {
       if (h === totals.amountCol) {
-        summaryRowData[h] = `إجمالي المبلغ: ${totals.totalAmount.toLocaleString('ar-SA')} ر.س`;
+        summaryRowData[h] = `${amountLabel}: ${amountToDisplay.toLocaleString('ar-SA')} ر.س`;
+        if (liquidationToDisplay > 0) {
+          summaryRowData[h] += ` | ${liquidationLabel}: ${liquidationToDisplay.toLocaleString('ar-SA')} ر.س`;
+        }
       } else if (h === totals.remainingCol) {
-        summaryRowData[h] = `إجمالي المتبقي: ${totals.totalRemaining.toLocaleString('ar-SA')} ر.س`;
+        summaryRowData[h] = `${remainingLabel}: ${remainingToDisplay.toLocaleString('ar-SA')} ر.س`;
         // If we can't use next column, append it here
         if (!nextColHeader && settledToDisplay > 0) {
           summaryRowData[h] += ` | ${settledLabel}: ${settledToDisplay.toLocaleString('ar-SA')} ر.س`;
@@ -477,7 +561,7 @@ export default function App() {
         // If the column after 'remaining' is available, use it for settled amount to avoid overlap
         summaryRowData[h] = `${settledLabel}: ${settledToDisplay.toLocaleString('ar-SA')} ر.س`;
       } else if (h === headers[0]) {
-        summaryRowData[h] = '--- الملخص الإجمالي ---';
+        summaryRowData[h] = isExportAll ? '--- الملخص الإجمالي (للملف كامل) ---' : '--- ملخص نتائج البحث ---';
       } else {
         summaryRowData[h] = '';
       }
@@ -538,9 +622,6 @@ export default function App() {
       {/* Top Navigation Bar */}
       <nav className="h-16 bg-white border-b border-slate-200 px-6 md:px-8 flex items-center justify-between shadow-sm shrink-0 sticky top-0 z-50">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-indigo-600 rounded-xl flex items-center justify-center text-white">
-            <Search size={22} strokeWidth={2.5} />
-          </div>
           <span className="text-xl font-bold text-slate-800 hidden sm:block">نظام البحث الذكي</span>
         </div>
         
@@ -618,19 +699,21 @@ export default function App() {
             <div className="absolute top-0 left-0 w-1 h-full bg-indigo-600"></div>
             <h2 className="text-[10px] font-bold text-slate-400 mb-6 uppercase tracking-normal flex items-center gap-2">
               <BarChart3 size={14} className="text-indigo-600" />
-              الملخص المالي {searchQuery.trim() ? '(للنتائج الحالية)' : '(للملف كاملاً)'}
+              الملخص المالي {(filterType !== 'all' || searchQuery) ? '(للنتائج المعروضة)' : '(للملف بالكامل)'}
             </h2>
             
             <div className="space-y-6">
               <div className="flex flex-col">
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-medium text-slate-500">إجمالي المبلغ</span>
+                  <span className="text-sm font-medium text-slate-500">
+                    {(filterType !== 'all' || searchQuery) ? 'إجمالي المبالغ بالبحث' : 'إجمالي المبلغ (كلي)'}
+                  </span>
                   <span className="text-xs bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full font-bold">
                     {totals.amountCol || 'لم يحدد'}
                   </span>
                 </div>
                 <p className="text-3xl font-black text-slate-800 tracking-normal">
-                  {totals.totalAmount.toLocaleString('ar-SA')} <span className="text-xs font-normal text-slate-400">ر.س</span>
+                  {totals.totalAmountFiltered.toLocaleString('ar-SA')} <span className="text-xs font-normal text-slate-400">ر.س</span>
                 </p>
               </div>
 
@@ -639,25 +722,41 @@ export default function App() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="flex flex-col bg-orange-50/50 p-3 rounded-2xl border border-orange-100">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] font-medium text-orange-700">إجمالي المتبقي</span>
+                    <span className="text-[10px] font-medium text-orange-700">
+                      {(filterType !== 'all' || searchQuery) ? 'المتبقي (للبحث)' : 'إجمالي المتبقي (كلي)'}
+                    </span>
                     <span className="text-[9px] bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded-full font-bold">
                       {totals.remainingCol || 'لم يحدد'}
                     </span>
                   </div>
                   <p className="text-xl font-black text-orange-600 tracking-tight">
-                    {totals.totalRemaining.toLocaleString('ar-SA')} <span className="text-[10px] font-normal text-orange-400">ر.س</span>
+                    {totals.totalRemainingFiltered.toLocaleString('ar-SA')} <span className="text-[10px] font-normal text-orange-400">ر.س</span>
                   </p>
                 </div>
 
                 <div className="flex flex-col bg-emerald-50/50 p-3 rounded-2xl border border-emerald-100">
                   <div className="flex items-center justify-between mb-1">
-                    <span className="text-[10px] font-medium text-emerald-700">إجمالي مبالغ التسوية</span>
+                    <span className="text-[10px] font-medium text-emerald-700">
+                      {(filterType !== 'all' || searchQuery) ? 'المسدد (للبحث)' : 'إجمالي المسدد (كلي)'}
+                    </span>
                     <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded-full font-bold">
                       تم سدادها
                     </span>
                   </div>
                   <p className="text-xl font-black text-emerald-600 tracking-tight">
-                    {totals.totalSettledGlobal.toLocaleString('ar-SA')} <span className="text-[10px] font-normal text-emerald-400">ر.س</span>
+                    {totals.totalSettledFiltered.toLocaleString('ar-SA')} <span className="text-[10px] font-normal text-emerald-400">ر.س</span>
+                  </p>
+                </div>
+
+                <div className="flex flex-col bg-red-50/50 p-3 rounded-2xl border border-red-100 col-span-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[10px] font-medium text-red-700">إجمالي مبالغ التصفية (للتصفية حالياً)</span>
+                    <span className="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded-full font-bold">
+                      تصفية
+                    </span>
+                  </div>
+                  <p className="text-xl font-black text-red-600 tracking-tight">
+                    {totals.totalLiquidationFiltered.toLocaleString('ar-SA')} <span className="text-[10px] font-normal text-red-400">ر.س</span>
                   </p>
                 </div>
               </div>
@@ -704,27 +803,58 @@ export default function App() {
 
         {/* Main Search Area */}
         <div className="col-span-12 lg:col-span-8 flex flex-col gap-6">
-          {/* Search Bar */}
-          <div className="relative group">
-            <div className="absolute inset-y-0 right-6 flex items-center pointer-events-none text-slate-400 group-focus-within:text-indigo-600 transition-colors">
-              <Search size={24} />
+          <div className="flex flex-col gap-4">
+            {/* Search Bar */}
+            <div className="relative group">
+              <input 
+                type="text" 
+                placeholder="ابحث في كافة الحقول والأعمدة (مثلاً: اسم، رقم، عقار، أو أي قيمة أخرى)..." 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                disabled={!fileName || isLoading}
+                className="w-full h-16 px-6 rounded-2xl border-none shadow-xl focus:ring-2 focus:ring-indigo-500 text-lg text-slate-700 placeholder-slate-400 bg-white transition-all disabled:bg-slate-50 disabled:cursor-not-allowed"
+              />
+              {searchQuery && (
+                <button 
+                  onClick={() => setSearchQuery('')}
+                  className="absolute left-4 top-1/2 -translate-y-1/2 p-2 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors"
+                  title="مسح البحث"
+                >
+                  <X size={20} />
+                </button>
+              )}
             </div>
-            <input 
-              type="text" 
-              placeholder="ابحث في كافة الحقول والأعمدة (مثلاً: اسم، رقم، عقار، أو أي قيمة أخرى)..." 
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              disabled={!fileName || isLoading}
-              className="w-full h-16 pr-16 pl-6 rounded-2xl border-none shadow-xl focus:ring-2 focus:ring-indigo-500 text-lg text-slate-700 placeholder-slate-400 bg-white transition-all disabled:bg-slate-50 disabled:cursor-not-allowed"
-            />
-            {searchQuery && (
-              <button 
-                onClick={() => setSearchQuery('')}
-                className="absolute left-4 top-1/2 -translate-y-1/2 p-2 hover:bg-slate-100 rounded-lg text-slate-400 transition-colors"
-                title="مسح البحث"
-              >
-                <X size={20} />
-              </button>
+
+            {/* Filter Bar */}
+            {fileName && (
+              <div className="flex items-center gap-2 overflow-x-auto pb-2 scrollbar-none px-2">
+                {[
+                  { id: 'all', label: 'الكل', icon: Database, count: filterCounts.all },
+                  { id: 'paid', label: 'المسددة', icon: Check, count: filterCounts.paid, color: 'text-emerald-600', bg: 'bg-emerald-50', activeBg: 'bg-emerald-600' },
+                  { id: 'modified', label: 'المعدلة', icon: Clock, count: filterCounts.modified, color: 'text-blue-600', bg: 'bg-blue-50', activeBg: 'bg-blue-600' },
+                  { id: 'normal', label: 'العادية', icon: FileSpreadsheet, count: filterCounts.normal }
+                ].map((filter) => {
+                  const isActive = filterType === filter.id;
+                  const Icon = filter.icon;
+                  return (
+                    <button
+                      key={filter.id}
+                      onClick={() => setFilterType(filter.id as any)}
+                      className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold whitespace-nowrap transition-all border ${
+                        isActive 
+                          ? `${filter.activeBg || 'bg-indigo-600'} text-white border-transparent shadow-lg shadow-indigo-100` 
+                          : `${filter.bg || 'bg-white'} ${filter.color || 'text-slate-600'} border-slate-200 hover:border-indigo-300`
+                      }`}
+                    >
+                      <Icon size={14} />
+                      <span>{filter.label}</span>
+                      <span className={`px-1.5 py-0.5 rounded-lg text-[10px] ${isActive ? 'bg-white/20' : 'bg-slate-100/50'}`}>
+                        {filter.count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             )}
           </div>
 
@@ -743,21 +873,16 @@ export default function App() {
                 <h3 className="text-xl font-bold text-slate-800 mb-2">ابدأ برفع ملف للبحث</h3>
                 <p className="text-slate-500 max-w-sm">ارفع ملف إكسل يحتوي على بياناتك، وسنساعدك في البحث عنها بسرعة فائقة.</p>
               </div>
-            ) : !searchQuery ? (
-              <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-3xl border border-slate-200 shadow-sm text-center p-8">
-                <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mb-6 text-indigo-300">
-                  <Search size={48} strokeWidth={1} />
-                </div>
-                <h3 className="text-xl font-bold text-slate-800 mb-2">اكتب شيئاً للبحث عنه</h3>
-                <p className="text-slate-500 max-w-sm">أدخل أي معلومة للبحث عنها بداخل كافة بيانات الملف المرفوع (اسم الشخص، العقار، رقم الجوال، وغيرها).</p>
-              </div>
             ) : filteredData.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center bg-white rounded-3xl border border-slate-200 shadow-sm text-center p-8">
                 <div className="w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mb-6 text-red-300">
                   <SearchSlash size={48} strokeWidth={1} />
                 </div>
                 <h3 className="text-xl font-bold text-slate-800 mb-2">لا توجد نتائج مطابقة</h3>
-                <p className="text-slate-500 max-w-sm">لم نجد أي سجل يحتوي على "{searchQuery}". حاول تجربة كلمات بحث أخرى.</p>
+                <p className="text-slate-500 max-w-sm">
+                  {searchQuery ? `لم نجد أي سجل يحتوي على "${searchQuery}".` : 'لا توجد بيانات لهذا الفلتر حالياً.'} 
+                  حاول تجربة خيارات بحث أو فلاتر أخرى.
+                </p>
               </div>
             ) : (
               <div className="flex flex-col gap-6 flex-1 overflow-hidden">
@@ -771,10 +896,12 @@ export default function App() {
                     <button 
                       onClick={() => exportToExcel(false)}
                       className="px-6 py-3 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-all shadow-md flex items-center gap-2 group"
-                      title="تحميل نتائج البحث الحالية"
+                      title={filterType !== 'all' ? `تحميل ${filterCounts[filterType]} سجل من ${filterType === 'paid' ? 'المسددة' : filterType === 'modified' ? 'المعدلة' : 'العادية'}` : "تحميل نتائج البحث الحالية"}
                     >
                       <Download size={18} className="group-hover:translate-y-0.5 transition-transform" />
-                      <span className="text-sm font-bold">تحميل النتائج</span>
+                      <span className="text-sm font-bold">
+                        {filterType === 'all' ? 'تحميل النتائج' : `تحميل ${filterType === 'paid' ? 'المسددة' : filterType === 'modified' ? 'المعدلة' : 'العادية'}`}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -937,17 +1064,21 @@ export default function App() {
                                 {isAmount ? (
                                   <div className="flex items-center gap-2 whitespace-nowrap">
                                     <span className="text-[10px] text-slate-400 font-normal">إجمالي المبلغ:</span>
-                                    <span>{totals.totalAmount.toLocaleString('ar-SA')} ر.س</span>
+                                    <span>{totals.totalAmountFiltered.toLocaleString('ar-SA')} ر.س</span>
                                   </div>
                                 ) : isRemaining ? (
                                   <div className="flex items-center gap-4 whitespace-nowrap">
                                     <div className="flex items-center gap-2">
                                       <span className="text-[10px] text-slate-400 font-normal">المتبقي:</span>
-                                      <span>{totals.totalRemaining.toLocaleString('ar-SA')} ر.س</span>
+                                      <span>{totals.totalRemainingFiltered.toLocaleString('ar-SA')} ر.س</span>
                                     </div>
                                     <div className="flex items-center gap-2 bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded-lg border border-emerald-100">
                                       <span className="text-[10px] opacity-70">المسدد حالياً:</span>
                                       <span className="font-bold">{totals.totalSettledFiltered.toLocaleString('ar-SA')} ر.س</span>
+                                    </div>
+                                    <div className="flex items-center gap-2 bg-red-50 text-red-600 px-2 py-0.5 rounded-lg border border-red-100">
+                                      <span className="text-[10px] opacity-70">التصفية:</span>
+                                      <span className="font-bold">{totals.totalLiquidationFiltered.toLocaleString('ar-SA')} ر.س</span>
                                     </div>
                                   </div>
                                 ) : header === headers[0] ? (
@@ -1000,7 +1131,9 @@ function headerLabel(header: string) {
 
 function highlightText(text: string, highlight: string) {
   if (!highlight.trim()) return text;
-  const parts = text.split(new RegExp(`(${highlight})`, 'gi'));
+  // Escape special characters for RegExp
+  const escapedHighlight = highlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const parts = text.split(new RegExp(`(${escapedHighlight})`, 'gi'));
   return (
     <span>
       {parts.map((part, i) => (
