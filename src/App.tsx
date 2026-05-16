@@ -44,13 +44,20 @@ export default function App() {
   const [filterType, setFilterType] = useState<'all' | 'paid' | 'modified' | 'normal'>('all');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+const normalizeArabic = (text: string) => {
+    return text
+      .toLowerCase()
+      .replace(/[أإآ]/g, 'ا')
+      .replace(/ة/g, 'ه');
+  };
+
   // 1. First, find matches just for the search query
   const searchMatches = useMemo(() => {
     if (!searchQuery.trim()) return data;
-    const query = searchQuery.toLowerCase();
+    const query = normalizeArabic(searchQuery.trim());
     return data.filter(row => {
       return Object.values(row).some(value => 
-        String(value || '').toLowerCase().includes(query)
+        normalizeArabic(String(value || '')).includes(query)
       );
     });
   }, [data, searchQuery]);
@@ -142,10 +149,11 @@ export default function App() {
           }
           
           // Calculate Liquidation (تصفية)
-          // Search in notesCol or any available column for the word "تصفية"
+          // Search in notesCol or any available column for "تصفية" or "تصفيه"
+          const normalizedTasfya = 'تصفيه'; // 'ة' is normalized to 'ه'
           const hasTasfya = notesCol 
-            ? String(row[notesCol] || '').includes('تصفية')
-            : Object.values(row).some(v => String(v || '').includes('تصفية'));
+            ? normalizeArabic(String(row[notesCol] || '')).includes(normalizedTasfya)
+            : Object.values(row).some(v => normalizeArabic(String(v || '')).includes(normalizedTasfya));
             
           if (hasTasfya) {
             totalLiquidationFiltered += val;
@@ -509,9 +517,9 @@ export default function App() {
       if (isPaid) {
         rowBgColor = "D1FAE5"; // Emerald 100
       } else if (isModifiedRow) {
-        // Check if notes column contains "تصفية"
-        const rowString = JSON.stringify(rowData);
-        if (rowString.includes('تصفية')) {
+        // Check if row contains "تصفية" or "تصفيه"
+        const isTasfya = Object.values(rowData).some(v => normalizeArabic(String(v || '')).includes('تصفيه'));
+        if (isTasfya) {
           rowBgColor = "FECACA"; // Red 200 for Tasfya
         } else {
           rowBgColor = "DBEAFE"; // Blue 100 for general edit
@@ -958,9 +966,9 @@ export default function App() {
                             textClass = "text-emerald-700 font-bold";
                             numBgClass = "text-emerald-500 bg-emerald-50/50";
                           } else if (isModifiedRow) {
-                            // Find any note-like field and check for "تصفية"
-                            const rowString = JSON.stringify(row);
-                            if (rowString.includes('تصفية')) {
+                            // Find any field and check for "تصفية" or "تصفيه"
+                            const isTasfya = Object.values(row).some(v => normalizeArabic(String(v || '')).includes('تصفيه'));
+                            if (isTasfya) {
                               rowBgClass = "bg-red-50/70 hover:bg-red-100/70 border-r-4 border-r-red-400";
                               textClass = "text-red-700 font-bold";
                               numBgClass = "text-red-500 bg-red-100/50";
@@ -1131,19 +1139,37 @@ function headerLabel(header: string) {
 
 function highlightText(text: string, highlight: string) {
   if (!highlight.trim()) return text;
-  // Escape special characters for RegExp
-  const escapedHighlight = highlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const parts = text.split(new RegExp(`(${escapedHighlight})`, 'gi'));
+  
+  // Create a regex that handles Arabic variations (e/h and a/i/u)
+  const createArabicRegex = (str: string) => {
+    let regexStr = str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    // Normalize Alef variations
+    regexStr = regexStr.replace(/[أإآا]/g, '[أإآا]');
+    // Normalize Teh Marbuta and Heh
+    regexStr = regexStr.replace(/[ةه]/g, '[ةه]');
+    return new RegExp(`(${regexStr})`, 'gi');
+  };
+
+  const regex = createArabicRegex(highlight);
+  const parts = text.split(regex);
+  
   return (
     <span>
-      {parts.map((part, i) => (
-        <span
-          key={i}
-          className={part.toLowerCase() === highlight.toLowerCase() ? 'bg-indigo-100 text-indigo-700 px-0.5 rounded' : ''}
-        >
-          {part}
-        </span>
-      ))}
+      {parts.map((part, i) => {
+        // Check if the part matches the highlight fuzzy (using the same logic)
+        const isMatch = regex.test(part);
+        // Reset regex index because of 'g' flag
+        regex.lastIndex = 0;
+        
+        return (
+          <span
+            key={i}
+            className={isMatch ? 'bg-indigo-100 text-indigo-700 px-0.5 rounded' : ''}
+          >
+            {part}
+          </span>
+        );
+      })}
     </span>
   );
 }
